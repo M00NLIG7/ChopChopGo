@@ -1,4 +1,5 @@
-module chopchopgo
+module github.com/M00NLIG7/ChopChopGo
+
 
 go 1.18
 
