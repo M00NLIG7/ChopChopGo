@@ -87,6 +87,7 @@ func SigmaAuditd() {
     outputBytes, err := os.ReadFile(auditdLogPath)
     if err != nil {
         log.Fatalf("Failed to read audit log: %v", err)
+        log.Fatalln(auditdLogPath)
     }
     events := ParseEvents(outputBytes)
 
