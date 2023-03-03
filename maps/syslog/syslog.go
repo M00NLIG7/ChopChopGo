@@ -34,7 +34,7 @@ func (e SyslogEvent) Select(name string) (interface{}, bool) {
     }
 }
 
-func ParseSyslog(logBytes []byte) ([]SyslogEvent) {
+func ParseEvents(logBytes []byte) ([]SyslogEvent) {
     log := string(logBytes)
     events := make([]SyslogEvent, 0)
 
@@ -58,12 +58,18 @@ func ParseSyslog(logBytes []byte) ([]SyslogEvent) {
     return events
 }
 
-func SyslogSigma() {
-    // Find the syslog file
+func FindLog() (string) {
     syslogPath := "/var/log/syslog"
     if _, err := os.Stat(syslogPath); os.IsNotExist(err) {
         syslogPath = "/var/log/messages"
     }
+    return syslogPath
+}
+
+func Chop(rulePath string) {
+    // Find the syslog file
+    syslogPath := FindLog()
+
     fmt.Printf("Using syslog file: %s\n", syslogPath)
 
     // Read the syslog file
@@ -80,16 +86,16 @@ func SyslogSigma() {
 
     // Parse the syslog events
     syslogBytes := []byte(strings.Join(syslogLines, "\n"))
-    events := ParseSyslog(syslogBytes)
+    events := ParseEvents(syslogBytes)
 
     // Load the Sigma ruleset
     ruleset, err := sigma.NewRuleset(sigma.Config{
-        Directory: []string{"./linux/syslog"},
+        Directory: []string{rulePath},
     })
     if err != nil {
         log.Fatalf("Failed to load ruleset: %v", err)
     }
-    fmt.Println(ruleset.Unsupported)
+    // fmt.Printf("Unsupported %v", ruleset.Unsupported)
 
     // Evaluate the events against the Sigma ruleset
     for _, event := range events {

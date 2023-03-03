@@ -58,7 +58,7 @@ func ParseEvents(logBytes []byte) ([]AuditEvent) {
 }
 
 // FindAuditLog finds the location of the audit log file by parsing the auditd.conf file
-func FindAuditLog() (string, error) {
+func FindLog() (string, error) {
 	// Open the auditd.conf file
 	file, err := os.Open("/etc/audit/auditd.conf")
 	if err != nil {
@@ -81,17 +81,18 @@ func FindAuditLog() (string, error) {
 	return "/var/log/audit/audit.log", nil
 }
 
-func SigmaAuditd() {
-    auditdLogPath, _ := FindAuditLog()
+func Chop(rulePath string) {
+    auditdLogPath, _ := FindLog()
 
     outputBytes, err := os.ReadFile(auditdLogPath)
     if err != nil {
         log.Fatalf("Failed to read audit log: %v", err)
-        log.Fatalln(auditdLogPath)
     }
+    fmt.Printf("Using Auditd file: %s\n", auditdLogPath)
+    
     events := ParseEvents(outputBytes)
 
-    path := [1]string{"./linux/auditd"}
+    path := [1]string{rulePath}
     ruleset, err := sigma.NewRuleset(sigma.Config{
         Directory: path[:],
     })
@@ -99,15 +100,14 @@ func SigmaAuditd() {
         log.Fatalf("Failed to load ruleset: %v", err)
     }
 
-    fmt.Println(ruleset.Unsupported)
     for _, event := range events {
         if result, match := ruleset.EvalAll(event); match {
             fmt.Println(result)
-            // fmt.Println(event)
         }
     }
     // print length of events
-    fmt.Println(len(events))
+    fmt.Printf("Processed %d auditd events\n", len(events))
+
 }
 
     
