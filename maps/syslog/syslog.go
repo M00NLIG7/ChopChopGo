@@ -18,7 +18,7 @@ type SyslogEvent struct {
 }
 
 func (e SyslogEvent) Keywords() ([]string, bool) {
-    return []string{e.Facility, e.Severity}, true
+    return []string{e.Facility, e.Severity, e.Message}, true
 }
 
 func (e SyslogEvent) Select(name string) (interface{}, bool) {
@@ -99,9 +99,14 @@ func Chop(rulePath string) {
 
     // Evaluate the events against the Sigma ruleset
     for _, event := range events {
+        // See if iptables is in event.Message
+        if strings.Contains(event.Message, "iptables") {
+            // fmt.Println(event.Severity) 
+        }
         if result, match := ruleset.EvalAll(event); match {
             fmt.Println(result)
         }
     }
     fmt.Printf("Processed %d syslog events\n", len(events))
 }
+

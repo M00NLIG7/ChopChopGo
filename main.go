@@ -5,10 +5,11 @@ import (
 	"fmt"
 
 	"github.com/M00NLIG7/ChopChopGo/maps/auditd"
+	"github.com/M00NLIG7/ChopChopGo/maps/journald"
 	"github.com/M00NLIG7/ChopChopGo/maps/syslog"
+	"github.com/docker/docker/daemon/logger/journald"
 )
 
-// type string rules_path
 
 func main(){
 	var target string
@@ -27,9 +28,9 @@ func main(){
 		auditd.Chop(path)
 	case "syslog":
 		syslog.Chop(path)
+	case "journald":
+		journald.Chop(path)
 	default:
-		// freebsd, openbsd,
-		// plan9, windows...
 		fmt.Printf("Invalid Target Type")
 		return
 	}
