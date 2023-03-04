@@ -1,5 +1,3 @@
-[![go report card](https://goreportcard.com/badge/github.com/M00NLIG7/ChopChopGo)](https://goreportcard.com/report/github.com/M00NLIG7/ChopChopGo)
-
 <div align="center">
  <p>
   <h1>
@@ -53,7 +51,7 @@ Processed 67504 syslog events
 #### Command Examples
 
 ```bash
-./ChopChopGo -target # Defaults to searching through auditd
+./ChopChopGo # Defaults to searching through auditd
 ./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/ # This searches through syslog with the official sigma rules
 ./ChopChopGo -target journald -rules ./rules/linux/builtin/ # This searches through journald with specified rules
 ```
