@@ -8,8 +8,21 @@
  </p>
 </div>
 
+---
+
+ChopChopGo inspired by Chainsaw utilizes Sigma rules for forensics artifact recovery, enabling rapid and comprehensive analysis of logs and other artifacts to identify potential security incidents and threats on Linux.
+
+## Features
+
+- :dart: Hunt for threats using [Sigma](https://github.com/SigmaHQ/sigma) detection rules and custom ChopChopGo detection rules
+- :zap: Lightning fast, written in go
+- :feather: Clean and lightweight execution and output formats without unnecessary bloat
+- :computer: Runs on Linux
+
+---
+
 ```
-$ sudo ./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/
+$ ./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/
   ▄████▄   ██░ ██  ▒█████   ██▓███      ▄████▄   ██░ ██  ▒█████   ██▓███       ▄████  ▒█████
  ▒██▀ ▀█  ▓██░ ██▒▒██▒  ██▒▓██░  ██▒   ▒██▀ ▀█  ▓██░ ██▒▒██▒  ██▒▓██░  ██▒    ██▒ ▀█▒▒██▒  ██▒
  ▒▓█    ▄ ▒██▀▀██░▒██░  ██▒▓██░ ██▓▒   ▒▓█    ▄ ▒██▀▀██░▒██░  ██▒▓██░ ██▓▒   ▒██░▄▄▄░▒██░  ██▒
@@ -35,4 +48,12 @@ Using syslog file: /var/log/messages
 |                 | successfully.                  |                                         |
 +-----------------+--------------------------------+-----------------------------------------+
 Processed 67504 syslog events
+```
+
+#### Command Examples
+
+```bash
+./ChopChopGo -target # Defaults to searching through auditd
+./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/ # This searches through syslog with the official sigma rules
+./ChopChopGo -target journald -rules ./rules/linux/builtin/ # This searches through journald with specified rules
 ```
