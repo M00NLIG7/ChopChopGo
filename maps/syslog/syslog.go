@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/markuskont/go-sigma-rule-engine"
+	"github.com/olekukonko/tablewriter"
+	"github.com/schollz/progressbar/v3"
 )
 
 // Representation of syslog event
@@ -15,6 +18,7 @@ type SyslogEvent struct {
     Facility string
     Severity string
     Message  string
+    Timestamp string
 }
 
 func (e SyslogEvent) Keywords() ([]string, bool) {
@@ -42,10 +46,24 @@ func ParseEvents(logBytes []byte) ([]SyslogEvent) {
         if len(line) == 0 {
             continue
         }
+
+        r := regexp.MustCompile(`^([a-zA-Z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})`)
+
+        matches := r.FindStringSubmatch(line)
+
+        if matches == nil {
+            fmt.Println("Failed to match timestamp")
+        }
+
+        timestamp := matches[1]
+
         parts := strings.SplitN(line, " ", 5)
         if len(parts) != 5 {
             continue
         }
+        // fmt.Println(parts)
+
+        
         facility := strings.TrimSuffix(parts[0], ":")
         severity := parts[1]
         message := strings.TrimSpace(parts[4])
@@ -53,6 +71,7 @@ func ParseEvents(logBytes []byte) ([]SyslogEvent) {
             Facility: facility,
             Severity: severity,
             Message:  message,
+            Timestamp: timestamp,
         })
     }
     return events
@@ -95,18 +114,27 @@ func Chop(rulePath string) {
     if err != nil {
         log.Fatalf("Failed to load ruleset: %v", err)
     }
-    // fmt.Printf("Unsupported %v", ruleset.Unsupported)
 
-    // Evaluate the events against the Sigma ruleset
+    bar := progressbar.Default(int64(len(events)))
+    // Make a list of sigma.Results called results
+    results := make([]sigma.Results, 0)
+
+    table := tablewriter.NewWriter(os.Stdout)
+    table.SetHeader([]string{"timestamp", "message", "tags"})
+
+    // list to string
     for _, event := range events {
-        // See if iptables is in event.Message
-        if strings.Contains(event.Message, "iptables") {
-            // fmt.Println(event.Severity) 
-        }
         if result, match := ruleset.EvalAll(event); match {
-            fmt.Println(result)
+            results = append(results, result)
+            
+            table.Append([]string{event.Timestamp, event.Message, strings.Join(result[0].Tags, "-")})
+
         }
+        bar.Add(1)
+        // time.Sleep(1 * time.Millisecond)
     }
+    // fmt.Println(results)
+    table.Render()
     fmt.Printf("Processed %d syslog events\n", len(events))
 }
 

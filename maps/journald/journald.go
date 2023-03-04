@@ -1,4 +1,4 @@
-package main
+package journald
 
 import (
 	"fmt"
@@ -27,13 +27,16 @@ func (e JournaldEvent) Select(name string) (interface{}, bool) {
 }
 
 func ParseEvents() ([]JournaldEvent) {
-    j, err := sdjournal.NewJournal()
+    j, err := sdjournal.NewJournal(
+
+    )
+    
     if err != nil {
         log.Fatal("Failed to open journal:", err)
     }
     defer j.Close()
 
-    err = j.SeekTail()
+    err = j.SeekHead()
     if err != nil {
         log.Fatal("Failed to seek to end of journal:", err)
     }
@@ -85,8 +88,4 @@ func Chop(rulePath string) {
     // print length of events
     fmt.Printf("Processed %d auditd events\n", len(events))
 
-}
-
-func main() {
-    Chop("./linux/journald")
 }

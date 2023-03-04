@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/markuskont/go-sigma-rule-engine"
+	"github.com/olekukonko/tablewriter"
+	"github.com/schollz/progressbar/v3"
 )
 
 // Representation of Audit log event
@@ -100,11 +102,29 @@ func Chop(rulePath string) {
         log.Fatalf("Failed to load ruleset: %v", err)
     }
 
+    bar := progressbar.Default(int64(len(events)))
+    // Make a list of sigma.Results called results
+    results := make([]sigma.Results, 0)
+
+    table := tablewriter.NewWriter(os.Stdout)
+    table.SetHeader([]string{"AUID", "exe", "terminal", "pid", "hostname", "tags"})
+
+    // list to string
     for _, event := range events {
         if result, match := ruleset.EvalAll(event); match {
-            fmt.Println(result)
+            results = append(results, result)
+            
+            table.Append([]string{event.Data["AUID"], event.Data["exe"], event.Data["terminal"], event.Data["pid"], event.Data["hostname"], strings.Join(result[0].Tags,"-")})
+
         }
+        bar.Add(1)
+        // time.Sleep(1 * time.Millisecond)
     }
+    // fmt.Println(results)
+    table.Render() // Send output
+
+    
+    
     // print length of events
     fmt.Printf("Processed %d auditd events\n", len(events))
 
