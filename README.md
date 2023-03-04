@@ -10,7 +10,7 @@
 
 ---
 
-ChopChopGo inspired by Chainsaw utilizes Sigma rules for forensics artifact recovery, enabling rapid and comprehensive analysis of logs and other artifacts to identify potential security incidents and threats on Linux.
+ChopChopGo, inspired by Chainsaw, utilizes Sigma rules for forensics artifact recovery, enabling rapid and comprehensive analysis of logs and other artifacts to identify potential security incidents and threats on Linux.
 
 ## Features
 
