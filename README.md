@@ -1,3 +1,4 @@
+[![go report card](https://goreportcard.com/badge/github.com/M00NLIG7/ChopChopGo)](https://goreportcard.com/report/github.com/M00NLIG7/ChopChopGo)
 <div align="center">
  <p>
   <h1>
