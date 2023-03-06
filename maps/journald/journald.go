@@ -26,6 +26,7 @@ func (e JournaldEvent) Select(name string) (interface{}, bool) {
 	}
 }
 
+
 func ParseEvents() []JournaldEvent {
 	j, err := sdjournal.NewJournal()
 
@@ -66,7 +67,7 @@ func ParseEvents() []JournaldEvent {
 	return events
 }
 
-func Chop(rulePath string) {
+func Chop(rulePath string) []sigma.Results {
 
 	events := ParseEvents()
 
@@ -78,12 +79,13 @@ func Chop(rulePath string) {
 		log.Fatalf("Failed to load ruleset: %v", err)
 	}
 
+	results := make([]sigma.Results, 0)
 	for _, event := range events {
 		if result, match := ruleset.EvalAll(event); match {
-			fmt.Println(result)
+			results = append(results, result)
 		}
 	}
 	// print length of events
 	fmt.Printf("Processed %d auditd events\n", len(events))
-
+	return results
 }

@@ -50,6 +50,18 @@ Using syslog file: /var/log/messages
 Processed 67504 syslog events
 ```
 
+## Quick Start Guide
+
+### Downloading and Running
+
+For an all-in-one zip container the ChopChopGo binary, and the official sigma rules to go with it, check out the [releases section](https://github.com/M00NLIG7/ChopChopGo/releases) In this releases section you will also find pre-compiled binary-only versions of ChopChopGo.
+
+If you want to compile ChopChopGo yourself, you can clone the ChopChopGo repo:
+
+`git clone https://github.com/M00NLIG7/ChopChopGo.git`
+
+and compile the code yourself by running: `go build`.
+
 #### Command Examples
 
 ```bash

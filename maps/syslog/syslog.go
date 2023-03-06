@@ -84,7 +84,7 @@ func FindLog() string {
 	return syslogPath
 }
 
-func Chop(rulePath string) {
+func Chop(rulePath string) []sigma.Results {
 	// Find the syslog file
 	syslogPath := FindLog()
 
@@ -135,4 +135,5 @@ func Chop(rulePath string) {
 	// fmt.Println(results)
 	table.Render()
 	fmt.Printf("Processed %d syslog events\n", len(events))
+	return results
 }
