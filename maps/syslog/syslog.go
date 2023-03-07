@@ -114,6 +114,9 @@ func Chop(rulePath string, outputType ...string) interface{} {
 
 	// Parse the syslog events
 	events, err := ParseEvents(syslogPath)
+    if err != nil {
+		log.Fatalf("Failed to parse events: %v", err)
+	}
 
 	// Load the Sigma ruleset
 	ruleset, err := sigma.NewRuleset(sigma.Config{
