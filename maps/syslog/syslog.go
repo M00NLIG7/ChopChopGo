@@ -28,7 +28,7 @@ type SyslogEvent struct {
 	Keywords is a function required for a sigma.Event
 	to be passed to sigma.Rulset.EvalAll
 
-	Keywords returns a list of the differnt keys in our
+	Keywords returns a list of the different keys in our
 	SyslogEvent struct.
 */
 func (e SyslogEvent) Keywords() ([]string, bool) {
