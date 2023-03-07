@@ -59,15 +59,14 @@ func (e SyslogEvent) Select(name string) (interface{}, bool) {
 	and builds a slice of SyslogEvent structs
 */
 func ParseEvents(logFile string) ([]SyslogEvent, error) {
-    file, err := os.Open(logFile)
+	file, err := os.Open(logFile)
 	if err != nil {
-        return nil, err
-    }
-    defer file.Close()
+		return nil, err
+	}
+	defer file.Close()
 
-
-    events := make([]SyslogEvent, 0)
-    scanner := bufio.NewScanner(file)
+	events := make([]SyslogEvent, 0)
+	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -108,77 +107,77 @@ func FindLog() string {
 }
 
 func Chop(rulePath string, outputType ...string) interface{} {
-    // Find the syslog file
-    syslogPath := FindLog()
+	// Find the syslog file
+	syslogPath := FindLog()
 
-    fmt.Printf("Using syslog file: %s\n", syslogPath)
+	fmt.Printf("Using syslog file: %s\n", syslogPath)
 
-    // Parse the syslog events
-    events, err := ParseEvents(syslogPath)
+	// Parse the syslog events
+	events, err := ParseEvents(syslogPath)
 
-    // Load the Sigma ruleset
-    ruleset, err := sigma.NewRuleset(sigma.Config{
-        Directory: []string{rulePath},
-    })
-    if err != nil {
-        log.Fatalf("Failed to load ruleset: %v", err)
-    }
+	// Load the Sigma ruleset
+	ruleset, err := sigma.NewRuleset(sigma.Config{
+		Directory: []string{rulePath},
+	})
+	if err != nil {
+		log.Fatalf("Failed to load ruleset: %v", err)
+	}
 
-    bar := progressbar.Default(int64(len(events)))
-    // Make a list of sigma.Results called results
-    results := make([]sigma.Results, 0)
+	bar := progressbar.Default(int64(len(events)))
+	// Make a list of sigma.Results called results
+	results := make([]sigma.Results, 0)
 
-    if outputType[0] == "json" {
-        var jsonResults []map[string]interface{}
-        for _, event := range events {
-            if result, match := ruleset.EvalAll(event); match {
-                results = append(results, result)
-                jsonResult := make(map[string]interface{})
-                jsonResult["timestamp"] = event.Timestamp
-                jsonResult["message"] = event.Message
-                jsonResult["tags"] = result[0].Tags
-                jsonResults = append(jsonResults, jsonResult)
-            }
-			
-            bar.Add(1)
-        }
-		
-        jsonBytes, err := json.MarshalIndent(jsonResults, "", "  ")
-        if err != nil {
-            log.Fatalf("Failed to marshal results to JSON: %v", err)
-        }
-        fmt.Printf("Processed %d syslog events\n", len(events))
-        return string(jsonBytes)
-    } else if outputType[0] == "csv" {
-        var csvResults [][]string
-        for _, event := range events {
-            if result, match := ruleset.EvalAll(event); match {
-                results = append(results, result)
-                csvResult := []string{event.Timestamp, event.Message, strings.Join(result[0].Tags, "-")}
-                csvResults = append(csvResults, csvResult)
-            }
-            bar.Add(1)
-        }
-        csvBytes := bytes.Buffer{}
-        csvWriter := csv.NewWriter(&csvBytes)
-        err := csvWriter.WriteAll(csvResults)
-        if err != nil {
-            log.Fatalf("Failed to write CSV results: %v", err)
-        }
-        fmt.Printf("Processed %d syslog events\n", len(events))
-        return csvBytes.String()
-    } else {
-        table := tablewriter.NewWriter(os.Stdout)
-        table.SetHeader([]string{"timestamp", "message", "tags"})
-        for _, event := range events {
-            if result, match := ruleset.EvalAll(event); match {
-                results = append(results, result)
-                table.Append([]string{event.Timestamp, event.Message, strings.Join(result[0].Tags, "-")})
-            }
-            bar.Add(1)
-        }
-        table.Render()
-        fmt.Printf("Processed %d syslog events\n", len(events))
-        return results
-    }
+	if outputType[0] == "json" {
+		var jsonResults []map[string]interface{}
+		for _, event := range events {
+			if result, match := ruleset.EvalAll(event); match {
+				results = append(results, result)
+				jsonResult := make(map[string]interface{})
+				jsonResult["timestamp"] = event.Timestamp
+				jsonResult["message"] = event.Message
+				jsonResult["tags"] = result[0].Tags
+				jsonResults = append(jsonResults, jsonResult)
+			}
+
+			bar.Add(1)
+		}
+
+		jsonBytes, err := json.MarshalIndent(jsonResults, "", "  ")
+		if err != nil {
+			log.Fatalf("Failed to marshal results to JSON: %v", err)
+		}
+		fmt.Printf("Processed %d syslog events\n", len(events))
+		return string(jsonBytes)
+	} else if outputType[0] == "csv" {
+		var csvResults [][]string
+		for _, event := range events {
+			if result, match := ruleset.EvalAll(event); match {
+				results = append(results, result)
+				csvResult := []string{event.Timestamp, event.Message, strings.Join(result[0].Tags, "-")}
+				csvResults = append(csvResults, csvResult)
+			}
+			bar.Add(1)
+		}
+		csvBytes := bytes.Buffer{}
+		csvWriter := csv.NewWriter(&csvBytes)
+		err := csvWriter.WriteAll(csvResults)
+		if err != nil {
+			log.Fatalf("Failed to write CSV results: %v", err)
+		}
+		fmt.Printf("Processed %d syslog events\n", len(events))
+		return csvBytes.String()
+	} else {
+		table := tablewriter.NewWriter(os.Stdout)
+		table.SetHeader([]string{"timestamp", "message", "tags"})
+		for _, event := range events {
+			if result, match := ruleset.EvalAll(event); match {
+				results = append(results, result)
+				table.Append([]string{event.Timestamp, event.Message, strings.Join(result[0].Tags, "-")})
+			}
+			bar.Add(1)
+		}
+		table.Render()
+		fmt.Printf("Processed %d syslog events\n", len(events))
+		return results
+	}
 }
