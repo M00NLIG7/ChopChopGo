@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/markuskont/go-sigma-rule-engine"
+	"github.com/M00NLIG7/go-sigma-rule-engine"
 	"github.com/olekukonko/tablewriter"
 	"github.com/schollz/progressbar/v3"
 )
@@ -136,6 +136,7 @@ func Chop(rulePath string, outputType string) interface{} {
 				jsonResult["timestamp"] = event.Timestamp
 				jsonResult["message"] = event.Message
 				jsonResult["tags"] = result[0].Tags
+				jsonResult["author"] = result[0].Author
 				jsonResults = append(jsonResults, jsonResult)
 			}
 
@@ -150,13 +151,13 @@ func Chop(rulePath string, outputType string) interface{} {
 		return string(jsonBytes)
 	} else if outputType == "csv" {
 		var csvData [][]string
-		csvHeader := []string{"timestamp", "message", "tags"}
+		csvHeader := []string{"timestamp", "message", "tags", "author"}
 		csvData = append(csvData, csvHeader)
 		
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
-				csvResult := []string{event.Timestamp, event.Message, strings.Join(result[0].Tags, "-")}
+				csvResult := []string{event.Timestamp, event.Message, strings.Join(result[0].Tags, "-"), result[0].Author}
 				csvData = append(csvData, csvResult)
 			}
 		}
@@ -172,11 +173,11 @@ func Chop(rulePath string, outputType string) interface{} {
 		bar := progressbar.Default(int64(len(events)))
 
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"timestamp", "message", "tags"})
+		table.SetHeader([]string{"timestamp", "message", "tags", "author"})
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
-				table.Append([]string{event.Timestamp, event.Message, strings.Join(result[0].Tags, "-")})
+				table.Append([]string{event.Timestamp, event.Message, strings.Join(result[0].Tags, "-"), result[0].Author})
 			}
 			bar.Add(1)
 		}

@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/M00NLIG7/go-sigma-rule-engine"
 	"github.com/coreos/go-systemd/v22/sdjournal"
-	"github.com/markuskont/go-sigma-rule-engine"
 	"github.com/olekukonko/tablewriter"
 	"github.com/schollz/progressbar/v3"
 )
@@ -96,6 +96,8 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 				jsonResult["message"] = event.Message
 				jsonResult["timestamp"] = event.Timestamp
 				jsonResult["Tags"] = result[0].Tags
+				jsonResult["Author"] = result[0].Author
+
 				jsonResults = append(jsonResults, jsonResult)
 			}
 		}
@@ -108,7 +110,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		return string(jsonBytes), nil
 	} else if outputType == "csv" {
 		var csvData [][]string
-		csvHeader := []string{"timestamp", "message", "tags"}
+		csvHeader := []string{"timestamp", "message", "tags", "author"}
 		csvData = append(csvData, csvHeader)
 
 		for _, event := range events {
@@ -118,6 +120,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 					event.Message,
 					strconv.FormatUint(event.Timestamp, 10),
 					strings.Join(result[0].Tags, "-"),
+					result[0].Author,
 				})
 			}
 		}
@@ -134,7 +137,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		bar := progressbar.Default(int64(len(events)))
 
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"timestamp", "message", "tags"})
+		table.SetHeader([]string{"timestamp", "message", "tags", "author"})
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
@@ -142,6 +145,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 					event.Message,
 					strconv.FormatUint(event.Timestamp, 10),
 					strings.Join(result[0].Tags, "-"),
+					result[0].Author,
 				})
 			}
 			bar.Add(1)

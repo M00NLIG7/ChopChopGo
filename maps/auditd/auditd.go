@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/markuskont/go-sigma-rule-engine"
+	"github.com/M00NLIG7/go-sigma-rule-engine"
 	"github.com/olekukonko/tablewriter"
 	"github.com/schollz/progressbar/v3"
 )
@@ -139,8 +139,8 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 				jsonResult["exe"] = event.Data["exe"]
 				jsonResult["terminal"] = event.Data["terminal"]
 				jsonResult["pid"] = event.Data["pid"]
-				jsonResult["hostname"] = event.Data["hostname"]
-				jsonResult["Tags"] = strings.Join(result[0].Tags, "-")
+				jsonResult["tags"] = strings.Join(result[0].Tags, "-")
+				jsonResult["author"] = result[0].Author
 				jsonResults = append(jsonResults, jsonResult)
 			}
 		}
@@ -154,7 +154,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		return string(jsonBytes), nil
 	} else if outputType == "csv" {
 		var csvData [][]string
-		csvHeader := []string{"User", "Exe", "Terminal", "PID", "Hostname", "Tags"}
+		csvHeader := []string{"User", "Exe", "Terminal", "PID", "Tags", "Author"}
 		csvData = append(csvData, csvHeader)
 
 		for _, event := range events {
@@ -165,8 +165,8 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 					event.Data["exe"],
 					event.Data["terminal"],
 					event.Data["pid"],
-					event.Data["hostname"],
 					strings.Join(result[0].Tags, "-"),
+					result[0].Author,
 				})
 			}
 		}
@@ -183,7 +183,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		bar := progressbar.Default(int64(len(events)))
 
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"User", "Exe", "Terminal", "PID", "Hostname", "Tags"})
+		table.SetHeader([]string{"User", "Exe", "Terminal", "PID", "Tags", "Author"})
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
@@ -192,8 +192,8 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 					event.Data["exe"],
 					event.Data["terminal"],
 					event.Data["pid"],
-					event.Data["hostname"],
 					strings.Join(result[0].Tags, "-"),
+					result[0].Author,
 				})
 			}
 			bar.Add(1)
