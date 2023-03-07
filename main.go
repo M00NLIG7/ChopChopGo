@@ -12,12 +12,14 @@ import (
 func main() {
 	var target string
 	var path string
+	var outputType string
 
 	flag.StringVar(&target, "target", "auditd", "where should the scan be conducted")
 	flag.StringVar(&path, "rules", "rules/linux/auditd", "where to pull the yaml rules youre applying")
+	flag.StringVar(&outputType, "out", "", "What type of output you want (csv, json, tables)")
 
 	flag.Parse()
-	a := `  ▄████▄   ██░ ██  ▒█████   ██▓███      ▄████▄   ██░ ██  ▒█████   ██▓███       ▄████  ▒█████  
+	banner := `  ▄████▄   ██░ ██  ▒█████   ██▓███      ▄████▄   ██░ ██  ▒█████   ██▓███       ▄████  ▒█████  
  ▒██▀ ▀█  ▓██░ ██▒▒██▒  ██▒▓██░  ██▒   ▒██▀ ▀█  ▓██░ ██▒▒██▒  ██▒▓██░  ██▒    ██▒ ▀█▒▒██▒  ██▒
  ▒▓█    ▄ ▒██▀▀██░▒██░  ██▒▓██░ ██▓▒   ▒▓█    ▄ ▒██▀▀██░▒██░  ██▒▓██░ ██▓▒   ▒██░▄▄▄░▒██░  ██▒
  ▒▓▓▄ ▄██▒░▓█ ░██ ▒██   ██░▒██▄█▓▒ ▒   ▒▓▓▄ ▄██▒░▓█ ░██ ▒██   ██░▒██▄█▓▒ ▒   ░▓█  ██▓▒██   ██░
@@ -29,14 +31,14 @@ func main() {
  ░                                     ░                                                    
 			By Keyboard Cowboys (M00NL1G7)
  `
-	fmt.Println(a)
+	fmt.Println(banner)
 	switch target {
 	case "auditd":
-		auditd.Chop(path)
+		auditd.Chop(path, outputType)
 	case "syslog":
-		syslog.Chop(path)
+		syslog.Chop(path, outputType)
 	case "journald":
-		journald.Chop(path)
+		journald.Chop(path, outputType)
 	default:
 		fmt.Printf("Invalid Target Type")
 		return

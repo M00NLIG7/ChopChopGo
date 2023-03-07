@@ -2,7 +2,11 @@ package auditd
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/csv"
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -102,21 +106,22 @@ func FindLog() (string, error) {
     return "", fmt.Errorf("log_file option not found in auditd.conf")
 }
 
-
-
-func Chop(rulePath string) ([]sigma.Results, error) {
+func Chop(rulePath string, outputType string) (interface{}, error) {
+    // Find the auditd file
     auditdLogPath, err := FindLog()
     if err != nil {
         return nil, fmt.Errorf("failed to find audit log: %v", err)
     }
 
-    fmt.Printf("Using Auditd file: %s\n", auditdLogPath)
+    fmt.Printf("Using auditd file: %s\n", auditdLogPath)
 
+    // Parse the auditd events
     events, err := ParseEvents(auditdLogPath)
     if err != nil {
         return nil, fmt.Errorf("failed to parse audit log: %v", err)
     }
 
+    // Load the Sigma ruleset
     ruleset, err := sigma.NewRuleset(sigma.Config{
         Directory: []string{rulePath},
     })
@@ -124,30 +129,80 @@ func Chop(rulePath string) ([]sigma.Results, error) {
         return nil, fmt.Errorf("failed to load ruleset: %v", err)
     }
 
-    results := make([]sigma.Results, 0)
-    table := tablewriter.NewWriter(os.Stdout)
-    table.SetHeader([]string{"AUID", "exe", "terminal", "pid", "hostname", "tags"})
-
     bar := progressbar.Default(int64(len(events)))
-    for _, event := range events {
-        if result, match := ruleset.EvalAll(event); match {
-            results = append(results, result)
+    // Make a list of sigma.Results called results
+    results := make([]sigma.Results, 0)
 
-            table.Append([]string{
-                event.Data["AUID"],
-                event.Data["exe"],
-                event.Data["terminal"],
-                event.Data["pid"],
-                event.Data["hostname"],
-                strings.Join(result[0].Tags, "-"),
-            })
+    if outputType == "json" {
+        var jsonResults []map[string]interface{}
+        for _, event := range events {
+            if result, match := ruleset.EvalAll(event); match {
+                results = append(results, result)
+                jsonResult := make(map[string]interface{})
+                jsonResult["AUID"] = event.Data["AUID"]
+                jsonResult["exe"] = event.Data["exe"]
+                jsonResult["terminal"] = event.Data["terminal"]
+                jsonResult["pid"] = event.Data["pid"]
+                jsonResult["hostname"] = event.Data["hostname"]
+                jsonResult["Tags"] = strings.Join(result[0].Tags, "-")
+                jsonResults = append(jsonResults, jsonResult)
+            }
+            bar.Add(1)
         }
-        bar.Add(1)
+		
+        jsonBytes, err := json.MarshalIndent(jsonResults, "", "  ")
+        if err != nil {
+            log.Fatalf("Failed to marshal results to JSON: %v", err)
+        }
+        fmt.Printf("Processed %d auditd events\n", len(events))
+        
+        fmt.Println(string(jsonBytes))
+        return string(jsonBytes), nil
+    } else if outputType == "csv" {
+        var csvData [][]string
+        for _, event := range events {
+            if result, match := ruleset.EvalAll(event); match {
+                results = append(results, result)
+                csvData = append(csvData, []string{
+                    event.Data["AUID"],
+                    event.Data["exe"],
+                    event.Data["terminal"],
+                    event.Data["pid"],
+                    event.Data["hostname"],
+                    strings.Join(result[0].Tags, "-"),
+                })
+            }
+            bar.Add(1)
+        }
+        csvBytes := bytes.Buffer{}
+        csvWriter := csv.NewWriter(&csvBytes)
+        err := csvWriter.WriteAll(csvData)
+        if err != nil {
+            log.Fatalf("Failed to write CSV results: %v", err)
+        }
+        fmt.Printf("Processed %d auditd events\n", len(events))
+
+        fmt.Println(csvBytes.String())
+        return csvBytes.String(), nil
+    } else {
+        table := tablewriter.NewWriter(os.Stdout)
+        table.SetHeader([]string{"User", "Exe", "Terminal", "PID", "Hostname", "Tags"})
+        for _, event := range events {
+            if result, match := ruleset.EvalAll(event); match {
+                results = append(results, result)
+                table.Append([]string{
+                    event.Data["AUID"],
+                    event.Data["exe"],
+                    event.Data["terminal"],
+                    event.Data["pid"],
+                    event.Data["hostname"],
+                    strings.Join(result[0].Tags, "-"),
+                })
+            }
+            bar.Add(1)
+        }
+        table.Render()
+        fmt.Printf("Processed %d auditd events\n", len(events))
+        return results, nil
     }
-    table.Render()
-
-    fmt.Printf("Processed %d auditd events\n", len(events))
-
-    return results, nil
 }
-
