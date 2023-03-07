@@ -106,11 +106,9 @@ func FindLog() string {
 	return syslogPath
 }
 
-func Chop(rulePath string, outputType ...string) interface{} {
+func Chop(rulePath string, outputType string) interface{} {
 	// Find the syslog file
 	syslogPath := FindLog()
-
-	fmt.Printf("Using syslog file: %s\n", syslogPath)
 
 	// Parse the syslog events
 	events, err := ParseEvents(syslogPath)
@@ -126,11 +124,10 @@ func Chop(rulePath string, outputType ...string) interface{} {
 		log.Fatalf("Failed to load ruleset: %v", err)
 	}
 
-	bar := progressbar.Default(int64(len(events)))
 	// Make a list of sigma.Results called results
 	results := make([]sigma.Results, 0)
 
-	if outputType[0] == "json" {
+	if outputType == "json" {
 		var jsonResults []map[string]interface{}
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
@@ -142,34 +139,38 @@ func Chop(rulePath string, outputType ...string) interface{} {
 				jsonResults = append(jsonResults, jsonResult)
 			}
 
-			bar.Add(1)
 		}
 
 		jsonBytes, err := json.MarshalIndent(jsonResults, "", "  ")
 		if err != nil {
 			log.Fatalf("Failed to marshal results to JSON: %v", err)
 		}
-		fmt.Printf("Processed %d syslog events\n", len(events))
+
+		fmt.Println(string(jsonBytes))
 		return string(jsonBytes)
-	} else if outputType[0] == "csv" {
-		var csvResults [][]string
+	} else if outputType == "csv" {
+		var csvData [][]string
+		csvHeader := []string{"timestamp", "message", "tags"}
+		csvData = append(csvData, csvHeader)
+		
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
 				csvResult := []string{event.Timestamp, event.Message, strings.Join(result[0].Tags, "-")}
-				csvResults = append(csvResults, csvResult)
+				csvData = append(csvData, csvResult)
 			}
-			bar.Add(1)
 		}
 		csvBytes := bytes.Buffer{}
 		csvWriter := csv.NewWriter(&csvBytes)
-		err := csvWriter.WriteAll(csvResults)
+		err := csvWriter.WriteAll(csvData)
 		if err != nil {
 			log.Fatalf("Failed to write CSV results: %v", err)
 		}
-		fmt.Printf("Processed %d syslog events\n", len(events))
+		fmt.Println(csvBytes.String())
 		return csvBytes.String()
 	} else {
+		bar := progressbar.Default(int64(len(events)))
+
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"timestamp", "message", "tags"})
 		for _, event := range events {

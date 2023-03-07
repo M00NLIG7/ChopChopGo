@@ -111,7 +111,6 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		return nil, fmt.Errorf("failed to find audit log: %v", err)
 	}
 
-	fmt.Printf("Using auditd file: %s\n", auditdLogPath)
 
 	// Parse the auditd events
 	events, err := ParseEvents(auditdLogPath)
@@ -127,7 +126,6 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		return nil, fmt.Errorf("failed to load ruleset: %v", err)
 	}
 
-	bar := progressbar.Default(int64(len(events)))
 	// Make a list of sigma.Results called results
 	results := make([]sigma.Results, 0)
 
@@ -145,19 +143,20 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 				jsonResult["Tags"] = strings.Join(result[0].Tags, "-")
 				jsonResults = append(jsonResults, jsonResult)
 			}
-			bar.Add(1)
 		}
 
 		jsonBytes, err := json.MarshalIndent(jsonResults, "", "  ")
 		if err != nil {
 			log.Fatalf("Failed to marshal results to JSON: %v", err)
 		}
-		fmt.Printf("Processed %d auditd events\n", len(events))
 
 		fmt.Println(string(jsonBytes))
 		return string(jsonBytes), nil
 	} else if outputType == "csv" {
 		var csvData [][]string
+		csvHeader := []string{"User", "Exe", "Terminal", "PID", "Hostname", "Tags"}
+		csvData = append(csvData, csvHeader)
+
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
@@ -170,7 +169,6 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 					strings.Join(result[0].Tags, "-"),
 				})
 			}
-			bar.Add(1)
 		}
 		csvBytes := bytes.Buffer{}
 		csvWriter := csv.NewWriter(&csvBytes)
@@ -178,11 +176,12 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		if err != nil {
 			log.Fatalf("Failed to write CSV results: %v", err)
 		}
-		fmt.Printf("Processed %d auditd events\n", len(events))
 
 		fmt.Println(csvBytes.String())
 		return csvBytes.String(), nil
 	} else {
+		bar := progressbar.Default(int64(len(events)))
+
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"User", "Exe", "Terminal", "PID", "Hostname", "Tags"})
 		for _, event := range events {

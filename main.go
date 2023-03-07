@@ -19,7 +19,8 @@ func main() {
 	flag.StringVar(&outputType, "out", "", "What type of output you want (csv, json, tables)")
 
 	flag.Parse()
-	banner := `  ▄████▄   ██░ ██  ▒█████   ██▓███      ▄████▄   ██░ ██  ▒█████   ██▓███       ▄████  ▒█████  
+	if(!((outputType == "csv") || (outputType == "json")))	{
+		banner := `  ▄████▄   ██░ ██  ▒█████   ██▓███      ▄████▄   ██░ ██  ▒█████   ██▓███       ▄████  ▒█████  
  ▒██▀ ▀█  ▓██░ ██▒▒██▒  ██▒▓██░  ██▒   ▒██▀ ▀█  ▓██░ ██▒▒██▒  ██▒▓██░  ██▒    ██▒ ▀█▒▒██▒  ██▒
  ▒▓█    ▄ ▒██▀▀██░▒██░  ██▒▓██░ ██▓▒   ▒▓█    ▄ ▒██▀▀██░▒██░  ██▒▓██░ ██▓▒   ▒██░▄▄▄░▒██░  ██▒
  ▒▓▓▄ ▄██▒░▓█ ░██ ▒██   ██░▒██▄█▓▒ ▒   ▒▓▓▄ ▄██▒░▓█ ░██ ▒██   ██░▒██▄█▓▒ ▒   ░▓█  ██▓▒██   ██░
@@ -32,6 +33,8 @@ func main() {
 			By Keyboard Cowboys (M00NL1G7)
  `
 	fmt.Println(banner)
+	}
+	
 	switch target {
 	case "auditd":
 		auditd.Chop(path, outputType)
