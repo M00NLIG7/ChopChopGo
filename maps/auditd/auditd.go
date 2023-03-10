@@ -136,11 +136,14 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 				results = append(results, result)
 				jsonResult := make(map[string]interface{})
 				jsonResult["AUID"] = event.Data["AUID"]
-				jsonResult["exe"] = event.Data["exe"]
-				jsonResult["terminal"] = event.Data["terminal"]
-				jsonResult["pid"] = event.Data["pid"]
-				jsonResult["tags"] = strings.Join(result[0].Tags, "-")
-				jsonResult["author"] = result[0].Author
+				jsonResult["Exe"] = event.Data["exe"]
+				jsonResult["Terminal"] = event.Data["terminal"]
+				jsonResult["Pid"] = event.Data["pid"]
+				jsonResult["Tags"] = strings.Join(result[0].Tags, "-")
+				jsonResult["Author"] = result[0].Author
+				jsonResult["ID"] = result[0].ID
+				jsonResult["Title"] = result[0].Title
+
 				jsonResults = append(jsonResults, jsonResult)
 			}
 		}
@@ -154,7 +157,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		return string(jsonBytes), nil
 	} else if outputType == "csv" {
 		var csvData [][]string
-		csvHeader := []string{"User", "Exe", "Terminal", "PID", "Tags", "Author"}
+		csvHeader := []string{"User", "Exe", "Terminal", "PID", "Tags", "Author", "ID", "Titles"}
 		csvData = append(csvData, csvHeader)
 
 		for _, event := range events {
@@ -167,6 +170,8 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 					event.Data["pid"],
 					strings.Join(result[0].Tags, "-"),
 					result[0].Author,
+					result[0].ID,
+					result[0].Title,
 				})
 			}
 		}

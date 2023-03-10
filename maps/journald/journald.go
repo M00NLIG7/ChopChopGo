@@ -97,7 +97,8 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 				jsonResult["timestamp"] = event.Timestamp
 				jsonResult["Tags"] = result[0].Tags
 				jsonResult["Author"] = result[0].Author
-
+				jsonResult["ID"] = result[0].ID
+				jsonResult["Title"] = result[0].Title
 				jsonResults = append(jsonResults, jsonResult)
 			}
 		}
@@ -110,7 +111,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		return string(jsonBytes), nil
 	} else if outputType == "csv" {
 		var csvData [][]string
-		csvHeader := []string{"timestamp", "message", "tags", "author"}
+		csvHeader := []string{"Timestamp", "Message", "Tags", "Author", "ID", "Title"}
 		csvData = append(csvData, csvHeader)
 
 		for _, event := range events {
@@ -121,6 +122,8 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 					strconv.FormatUint(event.Timestamp, 10),
 					strings.Join(result[0].Tags, "-"),
 					result[0].Author,
+					result[0].ID,
+					result[0].Title,
 				})
 			}
 		}

@@ -3,13 +3,27 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"os/user"
 
 	"github.com/M00NLIG7/ChopChopGo/maps/auditd"
 	"github.com/M00NLIG7/ChopChopGo/maps/journald"
 	"github.com/M00NLIG7/ChopChopGo/maps/syslog"
 )
 
+func isRoot() bool {
+    currentUser, err := user.Current()
+    if err != nil {
+        log.Fatalf("[isRoot] Unable to get current user: %s", err)
+    }
+    return currentUser.Username == "root"
+}
+
+
 func main() {
+	if !(isRoot()) {
+		log.Fatalf("Must run as superuser")
+	}
 	var target string
 	var path string
 	var outputType string
