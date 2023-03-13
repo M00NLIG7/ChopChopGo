@@ -69,3 +69,17 @@ and compile the code yourself by running: `go build`.
 ./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/ # This searches through syslog with the official sigma rules
 ./ChopChopGo -target journald -rules ./rules/linux/builtin/ # This searches through journald with specified rules
 ```
+#### Alternative Output Formats
+You may wish to use ChopChopGo in an automated fashion. The CSV and JSON output options are useful for this purpose. With both of these options, the header and progress statistics are not printed to the console.
+
+Each option can be specific using the `-out` parameter.
+
+##### CSV
+
+```bash
+./ChopChopGo -target sylog -rules ./rules/linux/builtin/syslog/ -out csv # This searches through syslog with the official sigma rules, then outputs the data in CSV format
+```
+##### JSON
+```bash
+./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/ -out json # This searches through syslog with the official sigma rules, then outputs the data as JSON
+```
