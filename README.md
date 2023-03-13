@@ -72,7 +72,7 @@ and compile the code yourself by running: `go build`.
 #### Alternative Output Formats
 You may wish to use ChopChopGo in an automated fashion. The CSV and JSON output options are useful for this purpose. With both of these options, the header and progress statistics are not printed to the console.
 
-Each option can be specific using the `-out` parameter.
+Each option can be specified using the `-out` parameter.
 
 ##### CSV
 
