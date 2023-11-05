@@ -12,13 +12,12 @@ import (
 )
 
 func isRoot() bool {
-    currentUser, err := user.Current()
-    if err != nil {
-        log.Fatalf("[isRoot] Unable to get current user: %s", err)
-    }
-    return currentUser.Username == "root"
+	currentUser, err := user.Current()
+	if err != nil {
+		log.Fatalf("[isRoot] Unable to get current user: %s", err)
+	}
+	return currentUser.Username == "root"
 }
-
 
 func main() {
 	if !(isRoot()) {
@@ -33,7 +32,7 @@ func main() {
 	flag.StringVar(&outputType, "out", "", "What type of output you want (csv, json, tables)")
 
 	flag.Parse()
-	if(!((outputType == "csv") || (outputType == "json")))	{
+	if !((outputType == "csv") || (outputType == "json")) {
 		banner := `  ▄████▄   ██░ ██  ▒█████   ██▓███      ▄████▄   ██░ ██  ▒█████   ██▓███       ▄████  ▒█████  
  ▒██▀ ▀█  ▓██░ ██▒▒██▒  ██▒▓██░  ██▒   ▒██▀ ▀█  ▓██░ ██▒▒██▒  ██▒▓██░  ██▒    ██▒ ▀█▒▒██▒  ██▒
  ▒▓█    ▄ ▒██▀▀██░▒██░  ██▒▓██░ ██▓▒   ▒▓█    ▄ ▒██▀▀██░▒██░  ██▒▓██░ ██▓▒   ▒██░▄▄▄░▒██░  ██▒
@@ -46,9 +45,9 @@ func main() {
  ░                                     ░                                                    
 			By Keyboard Cowboys (M00NL1G7)
  `
-	fmt.Println(banner)
+		fmt.Println(banner)
 	}
-	
+
 	switch target {
 	case "auditd":
 		auditd.Chop(path, outputType)

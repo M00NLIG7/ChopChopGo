@@ -25,21 +25,21 @@ type SyslogEvent struct {
 }
 
 /*
-	Keywords is a function required for a sigma.Event
-	to be passed to sigma.Rulset.EvalAll
+Keywords is a function required for a sigma.Event
+to be passed to sigma.Rulset.EvalAll
 
-	Keywords returns a list of the different keys in our
-	SyslogEvent struct.
+Keywords returns a list of the different keys in our
+SyslogEvent struct.
 */
 func (e SyslogEvent) Keywords() ([]string, bool) {
 	return []string{e.Facility, e.Severity, e.Message}, true
 }
 
 /*
-	Select is a function required for a sigma.Event
-	to be passed to sigma.Rulset.EvalAll
+Select is a function required for a sigma.Event
+to be passed to sigma.Rulset.EvalAll
 
-	Select returns the value for a specified key
+Select returns the value for a specified key
 */
 func (e SyslogEvent) Select(name string) (interface{}, bool) {
 	switch name {
@@ -55,8 +55,8 @@ func (e SyslogEvent) Select(name string) (interface{}, bool) {
 }
 
 /*
-	ParseEvents interprets and parses the log file
-	and builds a slice of SyslogEvent structs
+ParseEvents interprets and parses the log file
+and builds a slice of SyslogEvent structs
 */
 func ParseEvents(logFile string) ([]SyslogEvent, error) {
 	file, err := os.Open(logFile)
@@ -78,9 +78,12 @@ func ParseEvents(logFile string) ([]SyslogEvent, error) {
 
 		var timestamp string
 		switch {
-			case syslogMatches != nil: timestamp = syslogMatches[1]
-			case rsyslogMatches != nil: timestamp = rsyslogMatches[1]
-			default: return nil, fmt.Errorf("Failed to match timestamp")
+		case syslogMatches != nil:
+			timestamp = syslogMatches[1]
+		case rsyslogMatches != nil:
+			timestamp = rsyslogMatches[1]
+		default:
+			return nil, fmt.Errorf("Failed to match timestamp")
 		}
 
 		parts := strings.SplitN(line, " ", 5)
@@ -115,7 +118,7 @@ func Chop(rulePath string, outputType string) interface{} {
 
 	// Parse the syslog events
 	events, err := ParseEvents(syslogPath)
-    if err != nil {
+	if err != nil {
 		log.Fatalf("Failed to parse events: %v", err)
 	}
 
@@ -158,14 +161,14 @@ func Chop(rulePath string, outputType string) interface{} {
 		var csvData [][]string
 		csvHeader := []string{"Timestamp", "Message", "Tags", "Author", "ID", "Title"}
 		csvData = append(csvData, csvHeader)
-		
+
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
 				csvData = append(csvData, []string{
 					event.Timestamp,
 					event.Message,
-					strings.Join(result[0].Tags, "-"), 
+					strings.Join(result[0].Tags, "-"),
 					result[0].Author,
 					result[0].ID,
 					result[0].Title,
@@ -189,16 +192,16 @@ func Chop(rulePath string, outputType string) interface{} {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
 				table.Append([]string{
-					event.Timestamp, 
-					event.Message, 
-					strings.Join(result[0].Tags, "-"), 
+					event.Timestamp,
+					event.Message,
+					strings.Join(result[0].Tags, "-"),
 					result[0].Author,
 				})
 			}
 			bar.Add(1)
 		}
 		table.Render()
-		
+
 		fmt.Printf("Processed %d syslog events\n", len(events))
 		return results
 	}
