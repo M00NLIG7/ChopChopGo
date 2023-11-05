@@ -75,7 +75,7 @@ func ParseEvents(logFile string) ([]SyslogEvent, error) {
 		matches := r.FindStringSubmatch(line)
 
 		if matches == nil {
-			fmt.Println("Failed to match timestamp")
+			return nil, fmt.Errorf("Failed to match timestamp")
 		}
 
 		timestamp := matches[1]
