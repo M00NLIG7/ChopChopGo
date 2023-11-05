@@ -70,15 +70,18 @@ func ParseEvents(logFile string) ([]SyslogEvent, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		r := regexp.MustCompile(`^([a-zA-Z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})`)
+		syslogRegex := regexp.MustCompile(`^([a-zA-Z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})`)
+		rsyslogRegex := regexp.MustCompile(`^((-?(?:[1-9][0-9]*)?[0-9]{4})-(1[0-2]|0[1-9])-(3[01]|0[1-9]|[12][0-9])T(2[0-3]|[01][0-9]):([0-5][0-9]):([0-5][0-9])(\.[0-9]+)?(Z|[+-](?:2[0-3]|[01][0-9]):[0-5][0-9])?)`) // ISO 8601 timestamp written by rsyslog
 
-		matches := r.FindStringSubmatch(line)
+		syslogMatches := syslogRegex.FindStringSubmatch(line)
+		rsyslogMatches := rsyslogRegex.FindStringSubmatch(line)
 
-		if matches == nil {
-			return nil, fmt.Errorf("Failed to match timestamp")
+		var timestamp string
+		switch {
+			case syslogMatches != nil: timestamp = syslogMatches[1]
+			case rsyslogMatches != nil: timestamp = rsyslogMatches[1]
+			default: return nil, fmt.Errorf("Failed to match timestamp")
 		}
-
-		timestamp := matches[1]
 
 		parts := strings.SplitN(line, " ", 5)
 		if len(parts) != 5 {
