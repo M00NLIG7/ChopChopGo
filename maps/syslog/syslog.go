@@ -104,28 +104,28 @@ func ParseEvents(logFile string) ([]SyslogEvent, error) {
 	return events, nil
 }
 
-func FindLog() string {
-	syslogPath := "/var/log/syslog"
-	if _, err := os.Stat(syslogPath); os.IsNotExist(err) {
-		syslogPath = "/var/log/messages"
+func FindLog(file string) (string, error) {
+	var syslogPath string
+	if file != "" {
+		_, err := os.Stat(file) // stat the given path; we are interested in the possible error, focusing on an ErrNotExist
+		if err != nil {
+			return "", fmt.Errorf("Failed to find provided file %v", file)
+		}
+		syslogPath = file
+	} else {
+		syslogPath = "/var/log/syslog"
+		if _, err := os.Stat(syslogPath); os.IsNotExist(err) {
+			syslogPath = "/var/log/messages"
+		}
 	}
-	return syslogPath
-}
-
-func providedFileExists(path string) bool {
-	_, err := os.Stat(path) // stat the given path; we are interested in the possible error, focusing on an ErrNotExist
-	return !os.IsNotExist(err)
+	return syslogPath, nil
 }
 
 func Chop(rulePath string, outputType string, filePath string) interface{} {
-	var syslogPath string
-	switch {
-	case filePath != "" && providedFileExists(filePath):
-		syslogPath = filePath // use user-provided path
-	case filePath != "" && !providedFileExists(filePath):
-		log.Fatalf("Failed to find provided file: %v", filePath)
-	default:
-		syslogPath = FindLog() // get syslog from known default paths
+	// find the log file
+	syslogPath, err := FindLog(filePath)
+	if err != nil {
+		log.Fatalf("Failed to get syslog: %v", err)
 	}
 
 	// Parse the syslog events
