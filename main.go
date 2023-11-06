@@ -29,7 +29,7 @@ func main() {
 	var file string
 
 	flag.StringVar(&target, "target", "syslog", "what type of data is to be scanned (auditd, journald, syslog)")
-	flag.StringVar(&path, "rules", "rules/linux/auditd", "where to pull the yaml rules youre applying")
+	flag.StringVar(&path, "rules", "rules/linux/builtin/syslog", "where to pull the yaml rules youre applying")
 	flag.StringVar(&outputType, "out", "", "What type of output you want (csv, json, tables)")
 	flag.StringVar(&file, "file", "", "which specific file should be scanned (falls back to target-specific defaults when left empty)")
 
