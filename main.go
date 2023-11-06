@@ -26,10 +26,12 @@ func main() {
 	var target string
 	var path string
 	var outputType string
+	var file string
 
-	flag.StringVar(&target, "target", "auditd", "where should the scan be conducted")
+	flag.StringVar(&target, "target", "syslog", "what type of data is to be scanned (auditd, journald, syslog)")
 	flag.StringVar(&path, "rules", "rules/linux/auditd", "where to pull the yaml rules youre applying")
 	flag.StringVar(&outputType, "out", "", "What type of output you want (csv, json, tables)")
+	flag.StringVar(&file, "file", "", "which specific file should be scanned (falls back to target-specific defaults when left empty)")
 
 	flag.Parse()
 	if !((outputType == "csv") || (outputType == "json")) {
@@ -52,7 +54,7 @@ func main() {
 	case "auditd":
 		auditd.Chop(path, outputType)
 	case "syslog":
-		syslog.Chop(path, outputType)
+		syslog.Chop(path, outputType, file)
 	case "journald":
 		journald.Chop(path, outputType)
 	default:
