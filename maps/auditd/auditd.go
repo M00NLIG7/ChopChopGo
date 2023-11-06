@@ -80,37 +80,43 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 	return events, nil
 }
 
-// FindLog finds the location of the audit log file by parsing the auditd.conf file
-func FindLog() (string, error) {
-	// Open the auditd.conf file
-	file, err := os.Open("/etc/audit/auditd.conf")
-	if err != nil {
-		return "", fmt.Errorf("failed to open auditd.conf: %v", err)
-	}
-	defer file.Close()
+// FindLog takes the file from the given path or finds the location of the audit log file by parsing the auditd.conf file
+func FindLog(file string) (string, error) {
+	if file != "" {
+		_, err := os.Stat(file) // stat the given path; we are interested in the possible error, focusing on an ErrNotExist
+		if err != nil {
+			return "", fmt.Errorf("Failed to find provided file %v", file)
+		}
+		return file, nil
+	} else {
+		// Open the auditd.conf file
+		file, err := os.Open("/etc/audit/auditd.conf")
+		if err != nil {
+			return "", fmt.Errorf("failed to open auditd.conf: %v", err)
+		}
+		defer file.Close()
 
-	// Scan the file line by line
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		// Look for the log_file option
-		if strings.HasPrefix(line, "log_file ") {
-			path := strings.TrimSpace(strings.TrimPrefix(line, "log_file = "))
-			return path, nil
+		// Scan the file line by line
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			// Look for the log_file option
+			if strings.HasPrefix(line, "log_file ") {
+				path := strings.TrimSpace(strings.TrimPrefix(line, "log_file = "))
+				return path, nil
+			}
 		}
 	}
-
 	// If the log_file option is not found, return an error
 	return "", fmt.Errorf("log_file option not found in auditd.conf")
 }
 
-func Chop(rulePath string, outputType string) (interface{}, error) {
+func Chop(rulePath string, outputType string, filePath string) (interface{}, error) {
 	// Find the auditd file
-	auditdLogPath, err := FindLog()
+	auditdLogPath, err := FindLog(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find audit log: %v", err)
 	}
-
 
 	// Parse the auditd events
 	events, err := ParseEvents(auditdLogPath)

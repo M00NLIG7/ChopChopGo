@@ -52,7 +52,7 @@ func main() {
 
 	switch target {
 	case "auditd":
-		auditd.Chop(path, outputType)
+		auditd.Chop(path, outputType, file)
 	case "syslog":
 		syslog.Chop(path, outputType, file)
 	case "journald":
