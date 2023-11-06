@@ -56,7 +56,11 @@ func main() {
 	case "syslog":
 		syslog.Chop(path, outputType, file)
 	case "journald":
-		journald.Chop(path, outputType)
+		if file == "" {
+			journald.Chop(path, outputType)
+		} else {
+			fmt.Printf("combination of target %v and giving a file not supported", target)
+		}
 	default:
 		fmt.Printf("Invalid Target Type")
 		return
