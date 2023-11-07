@@ -85,3 +85,12 @@ Each option can be specified using the `-out` parameter.
 ```bash
 ./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/ -out json # This searches through syslog with the official sigma rules, then outputs the data as JSON
 ```
+
+### Updating Sigma Rules
+
+The repository includes a simple script to update the included sigma rules to the newest state from the [Sigma Rules repo](https://github.com/SigmaHQ/sigma/).
+
+```bash
+./update-rules.sh
+```
+
