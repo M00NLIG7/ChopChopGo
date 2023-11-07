@@ -9,3 +9,6 @@ generate:
 
 clean:
 	@echo "done."
+
+update-rules:
+	./update-rules.sh
