@@ -82,7 +82,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		Directory: path[:],
 	})
 	if err != nil {
-		return nil, fmt.Errorf("Failed to load ruleset: %v", err)
+		log.Fatalf("Failed to load ruleset: %v", err)
 	}
 
 	results := make([]sigma.Results, 0)

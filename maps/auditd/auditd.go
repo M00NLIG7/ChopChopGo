@@ -115,13 +115,13 @@ func Chop(rulePath string, outputType string, filePath string) (interface{}, err
 	// Find the auditd file
 	auditdLogPath, err := FindLog(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find audit log: %v", err)
+		log.Fatalf("failed to find audit log: %v", err)
 	}
 
 	// Parse the auditd events
 	events, err := ParseEvents(auditdLogPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse audit log: %v", err)
+		log.Fatalf("failed to parse audit log: %v", err)
 	}
 
 	// Load the Sigma ruleset
@@ -129,7 +129,7 @@ func Chop(rulePath string, outputType string, filePath string) (interface{}, err
 		Directory: []string{rulePath},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to load ruleset: %v", err)
+		log.Fatalf("failed to load ruleset: %v", err)
 	}
 
 	// Make a list of sigma.Results called results
