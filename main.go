@@ -21,7 +21,9 @@ func isRoot() bool {
 
 func main() {
 	if !(isRoot()) {
-		log.Fatalf("Must run as superuser")
+		// depending on the file access permissions, we might not need root rights
+		// especially when targeting logs collected from other systems, we might encounter more lax permissions on the files
+		fmt.Println("Warning: not running as superuser - some accesses might fail!")
 	}
 	var target string
 	var path string
