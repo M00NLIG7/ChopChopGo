@@ -62,11 +62,13 @@ If you want to compile ChopChopGo yourself, you can clone the ChopChopGo repo:
 
 and compile the code yourself by running: `go build`.
 
+You might need to install the development files for systemd (e. g. `apt-get install libsystemd-dev`)
+
 #### Command Examples
 
 ```bash
-./ChopChopGo # Defaults to searching through auditd
-./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/ # This searches through syslog with the official sigma rules
+./ChopChopGo # Defaults to searching through syslog 
+./ChopChopGo -target auditd -rules ./rules/linux/auditd/ -file /opt/evidence/auditd.log # This searches through auditd log with the official sigma rules
 ./ChopChopGo -target journald -rules ./rules/linux/builtin/ # This searches through journald with specified rules
 ```
 #### Alternative Output Formats
