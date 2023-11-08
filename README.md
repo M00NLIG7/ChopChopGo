@@ -73,6 +73,7 @@ You might need to install the development files for systemd (e. g. `apt-get inst
 ```
 #### Alternative Output Formats
 You may wish to use ChopChopGo in an automated fashion. The CSV and JSON output options are useful for this purpose. With both of these options, the header and progress statistics are not printed to the console.
+The alternative output format is written to stdout - you can process it from there (e. g. write it to a file for later use).
 
 Each option can be specified using the `-out` parameter.
 
