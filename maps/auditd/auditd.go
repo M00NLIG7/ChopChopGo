@@ -111,7 +111,7 @@ func FindLog(file string) (string, error) {
 	return "", fmt.Errorf("log_file option not found in auditd.conf")
 }
 
-func Chop(rulePath string, outputType string, filePath string) (interface{}, error) {
+func Chop(rulePath string, outputType string, filePath string) interface{} {
 	// Find the auditd file
 	auditdLogPath, err := FindLog(filePath)
 	if err != nil {
@@ -160,7 +160,7 @@ func Chop(rulePath string, outputType string, filePath string) (interface{}, err
 		}
 
 		fmt.Println(string(jsonBytes))
-		return string(jsonBytes), nil
+		return string(jsonBytes)
 	} else if outputType == "csv" {
 		var csvData [][]string
 		csvHeader := []string{"User", "Exe", "Terminal", "PID", "Tags", "Author", "ID", "Titles"}
@@ -189,7 +189,7 @@ func Chop(rulePath string, outputType string, filePath string) (interface{}, err
 		}
 
 		fmt.Println(csvBytes.String())
-		return csvBytes.String(), nil
+		return csvBytes.String()
 	} else {
 		bar := progressbar.Default(int64(len(events)))
 
@@ -211,6 +211,6 @@ func Chop(rulePath string, outputType string, filePath string) (interface{}, err
 		}
 		table.Render()
 		fmt.Printf("Processed %d auditd events\n", len(events))
-		return results, nil
+		return results
 	}
 }
