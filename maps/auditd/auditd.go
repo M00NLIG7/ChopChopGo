@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"regexp"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/M00NLIG7/go-sigma-rule-engine"
 	"github.com/olekukonko/tablewriter"
@@ -61,7 +64,17 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 		for _, part := range parts {
 			kv := strings.SplitN(part, "=", 2)
 			if len(kv) == 2 {
-				event[kv[0]] = kv[1]
+				if kv[0] == "msg" && strings.HasPrefix(kv[1], "audit(") {
+					// we got the entry containing the timestamp and id of the audit event
+					timestampRegex := regexp.MustCompile(`audit\(([\d]+)\.\d*:\d*\):`)
+					timestampString := (timestampRegex.FindStringSubmatch(kv[1]))[1]
+					unixTime, _ := strconv.ParseInt(timestampString, 10, 64)
+					timestamp := time.Unix(unixTime, 0)
+					event["timestamp"] = timestamp.UTC().Format(time.RFC3339)
+				} else {
+					// some other entry
+					event[kv[0]] = kv[1]
+				}
 			}
 		}
 
@@ -141,6 +154,7 @@ func Chop(rulePath string, outputType string, filePath string) interface{} {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
 				jsonResult := make(map[string]interface{})
+				jsonResult["Timestamp"] = event.Data["timestamp"]
 				jsonResult["AUID"] = event.Data["AUID"]
 				jsonResult["Exe"] = event.Data["exe"]
 				jsonResult["Terminal"] = event.Data["terminal"]
@@ -163,13 +177,14 @@ func Chop(rulePath string, outputType string, filePath string) interface{} {
 		return string(jsonBytes)
 	} else if outputType == "csv" {
 		var csvData [][]string
-		csvHeader := []string{"User", "Exe", "Terminal", "PID", "Tags", "Author", "ID", "Titles"}
+		csvHeader := []string{"Timestamp", "User", "Exe", "Terminal", "PID", "Tags", "Author", "ID", "Titles"}
 		csvData = append(csvData, csvHeader)
 
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
 				csvData = append(csvData, []string{
+					event.Data["timestamp"],
 					event.Data["AUID"],
 					event.Data["exe"],
 					event.Data["terminal"],
@@ -194,11 +209,12 @@ func Chop(rulePath string, outputType string, filePath string) interface{} {
 		bar := progressbar.Default(int64(len(events)))
 
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"User", "Exe", "Terminal", "PID", "Tags", "Author"})
+		table.SetHeader([]string{"Timestamp", "User", "Exe", "Terminal", "PID", "Tags", "Author"})
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
 				table.Append([]string{
+					event.Data["timestamp"],
 					event.Data["AUID"],
 					event.Data["exe"],
 					event.Data["terminal"],
