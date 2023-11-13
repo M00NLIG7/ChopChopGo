@@ -1,3 +1,5 @@
+//go:build linux
+
 package journald
 
 import (
@@ -74,7 +76,7 @@ func ParseEvents() []JournaldEvent {
 	return events
 }
 
-func Chop(rulePath string, outputType string) (interface{}, error) {
+func Chop(rulePath string, outputType string) interface{} {
 	events := ParseEvents()
 
 	path := [1]string{rulePath}
@@ -82,7 +84,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		Directory: path[:],
 	})
 	if err != nil {
-		return nil, fmt.Errorf("Failed to load ruleset: %v", err)
+		log.Fatalf("Failed to load ruleset: %v", err)
 	}
 
 	results := make([]sigma.Results, 0)
@@ -108,7 +110,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		}
 
 		fmt.Println(string(jsonBytes))
-		return string(jsonBytes), nil
+		return string(jsonBytes)
 	} else if outputType == "csv" {
 		var csvData [][]string
 		csvHeader := []string{"Timestamp", "Message", "Tags", "Author", "ID", "Title"}
@@ -135,7 +137,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		}
 
 		fmt.Println(csvBytes.String())
-		return csvBytes.String(), nil
+		return csvBytes.String()
 	} else {
 		bar := progressbar.Default(int64(len(events)))
 
@@ -155,6 +157,6 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		}
 		table.Render()
 		fmt.Printf("Processed %d journald events\n", len(events))
-		return results, nil
+		return results
 	}
 }

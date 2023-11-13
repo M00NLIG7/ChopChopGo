@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"regexp"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/M00NLIG7/go-sigma-rule-engine"
 	"github.com/olekukonko/tablewriter"
@@ -61,7 +64,17 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 		for _, part := range parts {
 			kv := strings.SplitN(part, "=", 2)
 			if len(kv) == 2 {
-				event[kv[0]] = kv[1]
+				if kv[0] == "msg" && strings.HasPrefix(kv[1], "audit(") {
+					// we got the entry containing the timestamp and id of the audit event
+					timestampRegex := regexp.MustCompile(`audit\(([\d]+)\.\d*:\d*\):`)
+					timestampString := (timestampRegex.FindStringSubmatch(kv[1]))[1]
+					unixTime, _ := strconv.ParseInt(timestampString, 10, 64)
+					timestamp := time.Unix(unixTime, 0)
+					event["timestamp"] = timestamp.UTC().Format(time.RFC3339)
+				} else {
+					// some other entry
+					event[kv[0]] = kv[1]
+				}
 			}
 		}
 
@@ -80,42 +93,48 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 	return events, nil
 }
 
-// FindLog finds the location of the audit log file by parsing the auditd.conf file
-func FindLog() (string, error) {
-	// Open the auditd.conf file
-	file, err := os.Open("/etc/audit/auditd.conf")
-	if err != nil {
-		return "", fmt.Errorf("failed to open auditd.conf: %v", err)
-	}
-	defer file.Close()
+// FindLog takes the file from the given path or finds the location of the audit log file by parsing the auditd.conf file
+func FindLog(file string) (string, error) {
+	if file != "" {
+		_, err := os.Stat(file) // stat the given path; we are interested in the possible error, focusing on an ErrNotExist
+		if err != nil {
+			return "", fmt.Errorf("Failed to find provided file %v", file)
+		}
+		return file, nil
+	} else {
+		// Open the auditd.conf file
+		file, err := os.Open("/etc/audit/auditd.conf")
+		if err != nil {
+			return "", fmt.Errorf("failed to open auditd.conf: %v", err)
+		}
+		defer file.Close()
 
-	// Scan the file line by line
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		// Look for the log_file option
-		if strings.HasPrefix(line, "log_file ") {
-			path := strings.TrimSpace(strings.TrimPrefix(line, "log_file = "))
-			return path, nil
+		// Scan the file line by line
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			// Look for the log_file option
+			if strings.HasPrefix(line, "log_file ") {
+				path := strings.TrimSpace(strings.TrimPrefix(line, "log_file = "))
+				return path, nil
+			}
 		}
 	}
-
 	// If the log_file option is not found, return an error
 	return "", fmt.Errorf("log_file option not found in auditd.conf")
 }
 
-func Chop(rulePath string, outputType string) (interface{}, error) {
+func Chop(rulePath string, outputType string, filePath string) interface{} {
 	// Find the auditd file
-	auditdLogPath, err := FindLog()
+	auditdLogPath, err := FindLog(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find audit log: %v", err)
+		log.Fatalf("failed to find audit log: %v", err)
 	}
-
 
 	// Parse the auditd events
 	events, err := ParseEvents(auditdLogPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse audit log: %v", err)
+		log.Fatalf("failed to parse audit log: %v", err)
 	}
 
 	// Load the Sigma ruleset
@@ -123,7 +142,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		Directory: []string{rulePath},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to load ruleset: %v", err)
+		log.Fatalf("failed to load ruleset: %v", err)
 	}
 
 	// Make a list of sigma.Results called results
@@ -135,6 +154,7 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
 				jsonResult := make(map[string]interface{})
+				jsonResult["Timestamp"] = event.Data["timestamp"]
 				jsonResult["AUID"] = event.Data["AUID"]
 				jsonResult["Exe"] = event.Data["exe"]
 				jsonResult["Terminal"] = event.Data["terminal"]
@@ -154,16 +174,17 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		}
 
 		fmt.Println(string(jsonBytes))
-		return string(jsonBytes), nil
+		return string(jsonBytes)
 	} else if outputType == "csv" {
 		var csvData [][]string
-		csvHeader := []string{"User", "Exe", "Terminal", "PID", "Tags", "Author", "ID", "Titles"}
+		csvHeader := []string{"Timestamp", "User", "Exe", "Terminal", "PID", "Tags", "Author", "ID", "Titles"}
 		csvData = append(csvData, csvHeader)
 
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
 				csvData = append(csvData, []string{
+					event.Data["timestamp"],
 					event.Data["AUID"],
 					event.Data["exe"],
 					event.Data["terminal"],
@@ -183,16 +204,17 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		}
 
 		fmt.Println(csvBytes.String())
-		return csvBytes.String(), nil
+		return csvBytes.String()
 	} else {
 		bar := progressbar.Default(int64(len(events)))
 
 		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"User", "Exe", "Terminal", "PID", "Tags", "Author"})
+		table.SetHeader([]string{"Timestamp", "User", "Exe", "Terminal", "PID", "Tags", "Author"})
 		for _, event := range events {
 			if result, match := ruleset.EvalAll(event); match {
 				results = append(results, result)
 				table.Append([]string{
+					event.Data["timestamp"],
 					event.Data["AUID"],
 					event.Data["exe"],
 					event.Data["terminal"],
@@ -205,6 +227,6 @@ func Chop(rulePath string, outputType string) (interface{}, error) {
 		}
 		table.Render()
 		fmt.Printf("Processed %d auditd events\n", len(events))
-		return results, nil
+		return results
 	}
 }

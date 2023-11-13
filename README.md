@@ -62,15 +62,18 @@ If you want to compile ChopChopGo yourself, you can clone the ChopChopGo repo:
 
 and compile the code yourself by running: `go build`.
 
+You might need to install the development files for systemd (e. g. `apt-get install libsystemd-dev`)
+
 #### Command Examples
 
 ```bash
-./ChopChopGo # Defaults to searching through auditd
-./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/ # This searches through syslog with the official sigma rules
+./ChopChopGo # Defaults to searching through syslog 
+./ChopChopGo -target auditd -rules ./rules/linux/auditd/ -file /opt/evidence/auditd.log # This searches through auditd log with the official sigma rules
 ./ChopChopGo -target journald -rules ./rules/linux/builtin/ # This searches through journald with specified rules
 ```
 #### Alternative Output Formats
 You may wish to use ChopChopGo in an automated fashion. The CSV and JSON output options are useful for this purpose. With both of these options, the header and progress statistics are not printed to the console.
+The alternative output format is written to stdout - you can process it from there (e. g. write it to a file for later use).
 
 Each option can be specified using the `-out` parameter.
 
@@ -83,3 +86,12 @@ Each option can be specified using the `-out` parameter.
 ```bash
 ./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/ -out json # This searches through syslog with the official sigma rules, then outputs the data as JSON
 ```
+
+### Updating Sigma Rules
+
+The repository includes a simple script to update the included sigma rules to the newest state from the [Sigma Rules repo](https://github.com/SigmaHQ/sigma/).
+
+```bash
+./update-rules.sh
+```
+
