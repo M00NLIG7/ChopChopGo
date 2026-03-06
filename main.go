@@ -21,51 +21,53 @@ func isRoot() bool {
 }
 
 func main() {
-	if !(isRoot()) {
+	if !isRoot() {
 		// depending on the file access permissions, we might not need root rights
 		// especially when targeting logs collected from other systems, we might encounter more lax permissions on the files
 		fmt.Fprintln(os.Stderr, "Warning: not running as superuser - some accesses might fail!")
 	}
+
 	var target string
 	var path string
 	var outputType string
 	var file string
 
 	flag.StringVar(&target, "target", "syslog", "what type of data is to be scanned (auditd, journald, syslog)")
-	flag.StringVar(&path, "rules", "rules/linux/builtin/syslog", "where to pull the yaml rules youre applying")
-	flag.StringVar(&outputType, "out", "", "What type of output you want (csv, json, tables)")
+	flag.StringVar(&path, "rules", "rules/linux/builtin/syslog", "where to pull the yaml rules you're applying")
+	flag.StringVar(&outputType, "out", "", "what type of output you want (csv, json, or leave empty for table)")
 	flag.StringVar(&file, "file", "", "which specific file should be scanned (falls back to target-specific defaults when left empty)")
 
 	flag.Parse()
-	if !((outputType == "csv") || (outputType == "json")) {
-		banner := `  ▄████▄   ██░ ██  ▒█████   ██▓███      ▄████▄   ██░ ██  ▒█████   ██▓███       ▄████  ▒█████  
+
+	if outputType != "csv" && outputType != "json" {
+		banner := `  ▄████▄   ██░ ██  ▒█████   ██▓███      ▄████▄   ██░ ██  ▒█████   ██▓███       ▄████  ▒█████
  ▒██▀ ▀█  ▓██░ ██▒▒██▒  ██▒▓██░  ██▒   ▒██▀ ▀█  ▓██░ ██▒▒██▒  ██▒▓██░  ██▒    ██▒ ▀█▒▒██▒  ██▒
  ▒▓█    ▄ ▒██▀▀██░▒██░  ██▒▓██░ ██▓▒   ▒▓█    ▄ ▒██▀▀██░▒██░  ██▒▓██░ ██▓▒   ▒██░▄▄▄░▒██░  ██▒
  ▒▓▓▄ ▄██▒░▓█ ░██ ▒██   ██░▒██▄█▓▒ ▒   ▒▓▓▄ ▄██▒░▓█ ░██ ▒██   ██░▒██▄█▓▒ ▒   ░▓█  ██▓▒██   ██░
  ▒ ▓███▀ ░░▓█▒░██▓░ ████▓▒░▒██▒ ░  ░   ▒ ▓███▀ ░░▓█▒░██▓░ ████▓▒░▒██▒ ░  ░   ░▒▓███▀▒░ ████▓▒░
- ░ ░▒ ▒  ░ ▒ ░░▒░▒░ ▒░▒░▒░ ▒▓▒░ ░  ░   ░ ░▒ ▒  ░ ▒ ░░▒░▒░ ▒░▒░▒░ ▒▓▒░ ░  ░    ░▒   ▒ ░ ▒░▒░▒░ 
-   ░  ▒    ▒ ░▒░ ░  ░ ▒ ▒░ ░▒ ░          ░  ▒    ▒ ░▒░ ░  ░ ▒ ▒░ ░▒ ░          ░   ░   ░ ▒ ▒░ 
- ░         ░  ░░ ░░ ░ ░ ▒  ░░          ░         ░  ░░ ░░ ░ ░ ▒  ░░          ░ ░   ░ ░ ░ ░ ▒  
- ░ ░       ░  ░  ░    ░ ░              ░ ░       ░  ░  ░    ░ ░                    ░     ░ ░  
- ░                                     ░                                                    
+ ░ ░▒ ▒  ░ ▒ ░░▒░▒░ ▒░▒░▒░ ▒▓▒░ ░  ░   ░ ░▒ ▒  ░ ▒ ░░▒░▒░ ▒░▒░▒░ ▒▓▒░ ░  ░    ░▒   ▒ ░ ▒░▒░▒░
+   ░  ▒    ▒ ░▒░ ░  ░ ▒ ▒░ ░▒ ░          ░  ▒    ▒ ░▒░ ░  ░ ▒ ▒░ ░▒ ░          ░   ░   ░ ▒ ▒░
+ ░         ░  ░░ ░░ ░ ░ ▒  ░░          ░         ░  ░░ ░░ ░ ░ ▒  ░░          ░ ░   ░ ░ ░ ░ ▒
+ ░ ░       ░  ░  ░    ░ ░              ░ ░       ░  ░  ░    ░ ░                    ░     ░ ░
+ ░                                     ░
 			By Keyboard Cowboys (M00NL1G7)
- `
+`
 		fmt.Println(banner)
 	}
 
 	switch target {
 	case "auditd":
-		auditd.Chop(path, outputType, file)
+		auditd.ChopToLog(path, outputType, file)
 	case "syslog":
-		syslog.Chop(path, outputType, file)
+		syslog.ChopToLog(path, outputType, file)
 	case "journald":
-		if file == "" {
-			journald.Chop(path, outputType)
-		} else {
-			fmt.Printf("combination of target %v and giving a file not supported", target)
+		if file != "" {
+			fmt.Fprintln(os.Stderr, "Error: the journald target does not support -file; journald uses a binary format accessible only via the systemd API.")
+			os.Exit(1)
 		}
+		journald.ChopToLog(path, outputType)
 	default:
-		fmt.Printf("Invalid Target Type")
-		return
+		fmt.Fprintf(os.Stderr, "Error: unknown target %q (must be auditd, journald, or syslog)\n", target)
+		os.Exit(1)
 	}
 }
