@@ -19,6 +19,16 @@ import (
 // Compiled once at package level to avoid per-line overhead.
 var timestampRe = regexp.MustCompile(`audit\((\d+)\.\d*:\d*\)`)
 
+// unquote strips surrounding double quotes from an auditd field value.
+// auditd wraps values that contain special characters in double quotes,
+// e.g. exe="/bin/cat" — we store the bare path so sigma rules match correctly.
+func unquote(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
 // AuditEvent represents a single record from the auditd log.
 type AuditEvent struct {
 	Type string
@@ -76,7 +86,7 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 				unixTime, _ := strconv.ParseInt(matches[1], 10, 64)
 				event["timestamp"] = time.Unix(unixTime, 0).UTC().Format(time.RFC3339)
 			} else {
-				event[kv[0]] = kv[1]
+				event[kv[0]] = unquote(kv[1])
 			}
 		}
 

@@ -24,9 +24,8 @@ func TestParseEventsStandard(t *testing.T) {
 	if first.Type != "SYSCALL" {
 		t.Errorf("expected type SYSCALL, got %q", first.Type)
 	}
-	// auditd log values are stored as-is, including surrounding quotes
-	if first.Data["exe"] != `"/bin/cat"` {
-		t.Errorf("expected exe=\"/bin/cat\", got %q", first.Data["exe"])
+	if first.Data["exe"] != "/bin/cat" {
+		t.Errorf("expected exe=/bin/cat, got %q", first.Data["exe"])
 	}
 	if first.Data["pid"] != "3538" {
 		t.Errorf("expected pid=3538, got %q", first.Data["pid"])
@@ -172,6 +171,51 @@ func TestAuditEventKeywords(t *testing.T) {
 	}
 	if !foundKey {
 		t.Errorf("Keywords() should contain data keys; got %v", keywords)
+	}
+}
+
+func TestUnquote(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`"/bin/cat"`, "/bin/cat"},
+		{`"sshd_config"`, "sshd_config"},
+		{`(null)`, "(null)"},
+		{`1000`, "1000"},
+		{`""`, ""},
+		{`"`, `"`},
+		{``, ``},
+	}
+	for _, c := range cases {
+		if got := unquote(c.in); got != c.want {
+			t.Errorf("unquote(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestParseEventsStripsQuotes(t *testing.T) {
+	tmp := t.TempDir()
+	f := filepath.Join(tmp, "audit.log")
+	// exe and comm are quoted in real auditd logs
+	content := "type=SYSCALL msg=audit(1364481363.243:1): arch=c000003e syscall=59 pid=100 auid=0 exe=\"/bin/bash\" comm=\"bash\" key=\"susp_activity\"\n"
+	if err := os.WriteFile(f, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := ParseEvents(f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	e := events[0]
+	if e.Data["exe"] != "/bin/bash" {
+		t.Errorf("exe: got %q, want /bin/bash", e.Data["exe"])
+	}
+	if e.Data["comm"] != "bash" {
+		t.Errorf("comm: got %q, want bash", e.Data["comm"])
+	}
+	if e.Data["key"] != "susp_activity" {
+		t.Errorf("key: got %q, want susp_activity", e.Data["key"])
 	}
 }
 
