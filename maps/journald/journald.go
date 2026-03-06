@@ -3,160 +3,139 @@
 package journald
 
 import (
-	"bytes"
-	"encoding/csv"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"strings"
+	"time"
 
-	"github.com/M00NLIG7/go-sigma-rule-engine"
+	sigma "github.com/M00NLIG7/go-sigma-rule-engine"
+	"github.com/M00NLIG7/ChopChopGo/maps/output"
 	"github.com/coreos/go-systemd/v22/sdjournal"
-	"github.com/olekukonko/tablewriter"
 	"github.com/schollz/progressbar/v3"
 )
 
+// JournaldEvent represents a single entry from the systemd journal.
 type JournaldEvent struct {
 	Message   string
-	Timestamp uint64
+	Timestamp string
 }
 
+// Keywords satisfies the sigma.Event interface.
 func (e JournaldEvent) Keywords() ([]string, bool) {
 	return []string{e.Message}, true
 }
 
+// Select satisfies the sigma.Event interface.
 func (e JournaldEvent) Select(name string) (interface{}, bool) {
 	switch name {
 	case "message":
 		return e.Message, true
+	case "timestamp":
+		return e.Timestamp, true
 	default:
 		return nil, false
 	}
 }
 
-func ParseEvents() []JournaldEvent {
+// ParseEvents reads all entries from the live systemd journal.
+// Journald uses a binary format that requires the systemd API; reading from
+// an arbitrary file path is not supported.
+func ParseEvents() ([]JournaldEvent, error) {
 	j, err := sdjournal.NewJournal()
-
 	if err != nil {
-		log.Fatal("Failed to open journal:", err)
+		return nil, fmt.Errorf("opening journal: %w", err)
 	}
 	defer j.Close()
 
-	err = j.SeekHead()
-	if err != nil {
-		log.Fatal("Failed to seek to end of journal:", err)
+	if err := j.SeekHead(); err != nil {
+		return nil, fmt.Errorf("seeking journal head: %w", err)
 	}
 
-	events := make([]JournaldEvent, 0)
-
+	var events []JournaldEvent
 	for {
 		n, err := j.Next()
 		if err != nil {
-			log.Fatal("Failed to read journal entry:", err)
+			return nil, fmt.Errorf("reading journal entry: %w", err)
 		}
 		if n == 0 {
 			break
 		}
+
 		message, _ := j.GetData("MESSAGE")
-		timestamp, _ := j.GetRealtimeUsec()
+		// Strip the "MESSAGE=" prefix that sdjournal includes in the value.
+		message = strings.TrimPrefix(message, "MESSAGE=")
+
+		usec, err := j.GetRealtimeUsec()
+		if err != nil {
+			return nil, fmt.Errorf("reading entry timestamp: %w", err)
+		}
+		ts := time.Unix(0, int64(usec)*int64(time.Microsecond)).UTC().Format(time.RFC3339)
 
 		events = append(events, JournaldEvent{
 			Message:   message,
-			Timestamp: timestamp,
+			Timestamp: ts,
 		})
-
-		if err != nil {
-			log.Fatal("Failed to get journal entry data:", err)
-		}
-		// Do something with the journal entry data...
 	}
-
-	return events
+	return events, nil
 }
 
-func Chop(rulePath string, outputType string) interface{} {
-	events := ParseEvents()
+var journaldRenderer = output.Renderer{
+	Headers: []string{"Timestamp", "Message", "Tags", "Author"},
+	Row: func(r output.ScanResult) []string {
+		return []string{r.Timestamp, r.Message, output.TagString(r.Tags), r.Author}
+	},
+}
 
-	path := [1]string{rulePath}
-	ruleset, err := sigma.NewRuleset(sigma.Config{
-		Directory: path[:],
-	})
+// Chop scans the live systemd journal against Sigma rules and writes results
+// to stdout. Passing a file path is not supported because the journal uses a
+// binary format that requires the systemd API.
+func Chop(rulePath, outputType string) error {
+	events, err := ParseEvents()
 	if err != nil {
-		log.Fatalf("Failed to load ruleset: %v", err)
+		return fmt.Errorf("reading journal: %w", err)
 	}
 
-	results := make([]sigma.Results, 0)
+	ruleset, err := sigma.NewRuleset(sigma.Config{Directory: []string{rulePath}})
+	if err != nil {
+		return fmt.Errorf("loading ruleset: %w", err)
+	}
 
-	if outputType == "json" {
-		var jsonResults []map[string]interface{}
-		for _, event := range events {
-			if result, match := ruleset.EvalAll(event); match {
-				results = append(results, result)
-				jsonResult := make(map[string]interface{})
-				jsonResult["message"] = event.Message
-				jsonResult["timestamp"] = event.Timestamp
-				jsonResult["Tags"] = result[0].Tags
-				jsonResult["Author"] = result[0].Author
-				jsonResult["ID"] = result[0].ID
-				jsonResult["Title"] = result[0].Title
-				jsonResults = append(jsonResults, jsonResult)
-			}
+	showProgress := outputType != "json" && outputType != "csv"
+	var bar *progressbar.ProgressBar
+	if showProgress {
+		bar = progressbar.Default(int64(len(events)))
+	}
+
+	var results []output.ScanResult
+	for _, event := range events {
+		if res, match := ruleset.EvalAll(event); match {
+			results = append(results, output.ScanResult{
+				Timestamp: event.Timestamp,
+				Message:   event.Message,
+				Tags:      res[0].Tags,
+				Author:    res[0].Author,
+				RuleID:    res[0].ID,
+				Title:     res[0].Title,
+			})
 		}
-		jsonBytes, err := json.MarshalIndent(jsonResults, "", "  ")
-		if err != nil {
-			log.Fatalf("Failed to marshal results to JSON: %v", err)
-		}
-
-		fmt.Println(string(jsonBytes))
-		return string(jsonBytes)
-	} else if outputType == "csv" {
-		var csvData [][]string
-		csvHeader := []string{"Timestamp", "Message", "Tags", "Author", "ID", "Title"}
-		csvData = append(csvData, csvHeader)
-
-		for _, event := range events {
-			if result, match := ruleset.EvalAll(event); match {
-				results = append(results, result)
-				csvData = append(csvData, []string{
-					event.Message,
-					strconv.FormatUint(event.Timestamp, 10),
-					strings.Join(result[0].Tags, "-"),
-					result[0].Author,
-					result[0].ID,
-					result[0].Title,
-				})
-			}
-		}
-		csvBytes := bytes.Buffer{}
-		csvWriter := csv.NewWriter(&csvBytes)
-		err := csvWriter.WriteAll(csvData)
-		if err != nil {
-			log.Fatalf("Failed to write CSV results: %v", err)
-		}
-
-		fmt.Println(csvBytes.String())
-		return csvBytes.String()
-	} else {
-		bar := progressbar.Default(int64(len(events)))
-
-		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"timestamp", "message", "tags", "author"})
-		for _, event := range events {
-			if result, match := ruleset.EvalAll(event); match {
-				results = append(results, result)
-				table.Append([]string{
-					event.Message,
-					strconv.FormatUint(event.Timestamp, 10),
-					strings.Join(result[0].Tags, "-"),
-					result[0].Author,
-				})
-			}
+		if showProgress {
 			bar.Add(1)
 		}
-		table.Render()
+	}
+
+	if err := output.Write(os.Stdout, outputType, results, journaldRenderer); err != nil {
+		return fmt.Errorf("writing output: %w", err)
+	}
+	if showProgress {
 		fmt.Printf("Processed %d journald events\n", len(events))
-		return results
+	}
+	return nil
+}
+
+// ChopToLog is like Chop but calls log.Fatalf on error, for use from main.
+func ChopToLog(rulePath, outputType string) {
+	if err := Chop(rulePath, outputType); err != nil {
+		log.Fatalf("journald: %v", err)
 	}
 }
