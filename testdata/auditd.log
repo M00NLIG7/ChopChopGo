@@ -1,0 +1,7 @@
+type=SYSCALL msg=audit(1364481363.243:24287): arch=c000003e syscall=2 success=no exit=-13 a0=7fffd19c5592 a1=0 a2=7fffd19c4b50 a3=a items=1 ppid=2686 pid=3538 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts0 ses=1 comm="cat" exe="/bin/cat" key="sshd_config"
+type=CWD msg=audit(1364481363.243:24287): cwd="/home/user"
+type=PATH msg=audit(1364481363.243:24287): item=0 name="/etc/ssh/sshd_config" inode=409248 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL
+type=EXECVE msg=audit(1364481400.000:24288): argc=4 a0="nc" a1="-l" a2="-p" a3="4444" exe="/bin/nc" pid=9876 auid=0
+some random line that should be skipped
+another non-type line
+type=USER_AUTH msg=audit(1364481500.000:24289): pid=1234 uid=0 auid=4294967295 ses=4294967295 msg='op=PAM:authentication acct="root" exe="/usr/sbin/sshd" hostname=192.168.1.10 addr=192.168.1.10 terminal=ssh res=failed'

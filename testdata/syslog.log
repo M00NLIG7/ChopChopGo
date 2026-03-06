@@ -1,0 +1,4 @@
+Mar  1 10:00:01 hostname sshd[1234]: Accepted password for user from 192.168.1.1 port 22 ssh2
+Mar  2 20:04:38 fedora systemd[1]: iptables.service: Deactivated successfully.
+Mar  3 11:15:30 server kernel: EXT4-fs error (device sda1): ext4_validate_block_bitmap:376
+Mar  4 09:00:00 host cron[5678]: (root) CMD (rm /var/log/syslog)
