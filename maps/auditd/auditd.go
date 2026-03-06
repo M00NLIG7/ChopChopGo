@@ -2,29 +2,30 @@ package auditd
 
 import (
 	"bufio"
-	"bytes"
-	"encoding/csv"
-	"encoding/json"
-	"regexp"
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/M00NLIG7/go-sigma-rule-engine"
-	"github.com/olekukonko/tablewriter"
+	sigma "github.com/M00NLIG7/go-sigma-rule-engine"
+	"github.com/M00NLIG7/ChopChopGo/maps/output"
 	"github.com/schollz/progressbar/v3"
 )
 
-// AuditEvent represents an Audit log event
+// timestampRe extracts the Unix second from an audit(SSSS.mmm:ID) token.
+// Compiled once at package level to avoid per-line overhead.
+var timestampRe = regexp.MustCompile(`audit\((\d+)\.\d*:\d*\)`)
+
+// AuditEvent represents a single record from the auditd log.
 type AuditEvent struct {
 	Type string
 	Data map[string]string
 }
 
-// Keywords returns the keywords for an AuditEvent
+// Keywords satisfies the sigma.Event interface.
 func (e AuditEvent) Keywords() ([]string, bool) {
 	keywords := []string{e.Type}
 	for k := range e.Data {
@@ -33,7 +34,7 @@ func (e AuditEvent) Keywords() ([]string, bool) {
 	return keywords, true
 }
 
-// Select returns the value of the given field for an AuditEvent
+// Select satisfies the sigma.Event interface.
 func (e AuditEvent) Select(name string) (interface{}, bool) {
 	if name == "type" {
 		return e.Type, true
@@ -44,6 +45,7 @@ func (e AuditEvent) Select(name string) (interface{}, bool) {
 	return nil, false
 }
 
+// ParseEvents reads an auditd log file and returns the parsed events.
 func ParseEvents(logFile string) ([]AuditEvent, error) {
 	file, err := os.Open(logFile)
 	if err != nil {
@@ -53,180 +55,142 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 
 	events := make([]AuditEvent, 0)
 	scanner := bufio.NewScanner(file)
-	event := make(map[string]string) // create a single map outside the loop
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "type=") {
 			continue
 		}
 
-		parts := strings.Split(line, " ")
-		for _, part := range parts {
+		event := make(map[string]string)
+		for _, part := range strings.Split(line, " ") {
 			kv := strings.SplitN(part, "=", 2)
-			if len(kv) == 2 {
-				if kv[0] == "msg" && strings.HasPrefix(kv[1], "audit(") {
-					// we got the entry containing the timestamp and id of the audit event
-					timestampRegex := regexp.MustCompile(`audit\(([\d]+)\.\d*:\d*\):`)
-					timestampString := (timestampRegex.FindStringSubmatch(kv[1]))[1]
-					unixTime, _ := strconv.ParseInt(timestampString, 10, 64)
-					timestamp := time.Unix(unixTime, 0)
-					event["timestamp"] = timestamp.UTC().Format(time.RFC3339)
-				} else {
-					// some other entry
-					event[kv[0]] = kv[1]
+			if len(kv) != 2 {
+				continue
+			}
+			if kv[0] == "msg" && strings.HasPrefix(kv[1], "audit(") {
+				matches := timestampRe.FindStringSubmatch(kv[1])
+				if matches == nil {
+					// Malformed audit timestamp — skip this field, don't panic.
+					continue
 				}
+				unixTime, _ := strconv.ParseInt(matches[1], 10, 64)
+				event["timestamp"] = time.Unix(unixTime, 0).UTC().Format(time.RFC3339)
+			} else {
+				event[kv[0]] = kv[1]
 			}
 		}
 
 		if len(event) > 0 {
-			events = append(events, AuditEvent{
-				Type: event["type"],
-				Data: event,
-			})
-			event = make(map[string]string) // clear the map for the next event
+			events = append(events, AuditEvent{Type: event["type"], Data: event})
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	return events, nil
+	return events, scanner.Err()
 }
 
-// FindLog takes the file from the given path or finds the location of the audit log file by parsing the auditd.conf file
+// FindLog returns filePath when non-empty, otherwise reads /etc/audit/auditd.conf
+// to locate the active log file.
 func FindLog(file string) (string, error) {
 	if file != "" {
-		_, err := os.Stat(file) // stat the given path; we are interested in the possible error, focusing on an ErrNotExist
-		if err != nil {
-			return "", fmt.Errorf("Failed to find provided file %v", file)
+		if _, err := os.Stat(file); err != nil {
+			return "", fmt.Errorf("failed to find provided file %v", file)
 		}
 		return file, nil
-	} else {
-		// Open the auditd.conf file
-		file, err := os.Open("/etc/audit/auditd.conf")
-		if err != nil {
-			return "", fmt.Errorf("failed to open auditd.conf: %v", err)
-		}
-		defer file.Close()
+	}
 
-		// Scan the file line by line
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			// Look for the log_file option
-			if strings.HasPrefix(line, "log_file ") {
-				path := strings.TrimSpace(strings.TrimPrefix(line, "log_file = "))
-				return path, nil
+	f, err := os.Open("/etc/audit/auditd.conf")
+	if err != nil {
+		return "", fmt.Errorf("failed to open auditd.conf: %v", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "log_file") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1]), nil
 			}
 		}
 	}
-	// If the log_file option is not found, return an error
 	return "", fmt.Errorf("log_file option not found in auditd.conf")
 }
 
-func Chop(rulePath string, outputType string, filePath string) interface{} {
-	// Find the auditd file
+var auditdRenderer = output.Renderer{
+	Headers: []string{"Timestamp", "User", "Exe", "Terminal", "PID", "Tags", "Author"},
+	Row: func(r output.ScanResult) []string {
+		return []string{
+			r.Timestamp,
+			r.User,
+			r.Exe,
+			r.Terminal,
+			r.PID,
+			output.TagString(r.Tags),
+			r.Author,
+		}
+	},
+}
+
+func toScanResult(event AuditEvent, res sigma.Results) output.ScanResult {
+	return output.ScanResult{
+		Timestamp: event.Data["timestamp"],
+		// auditd logs use lowercase "auid", not "AUID"
+		User:     event.Data["auid"],
+		Exe:      event.Data["exe"],
+		Terminal: event.Data["terminal"],
+		PID:      event.Data["pid"],
+		Tags:     res[0].Tags,
+		Author:   res[0].Author,
+		RuleID:   res[0].ID,
+		Title:    res[0].Title,
+	}
+}
+
+// Chop scans the auditd log against Sigma rules and writes results to stdout.
+func Chop(rulePath, outputType, filePath string) error {
 	auditdLogPath, err := FindLog(filePath)
 	if err != nil {
-		log.Fatalf("failed to find audit log: %v", err)
+		return fmt.Errorf("finding audit log: %w", err)
 	}
 
-	// Parse the auditd events
 	events, err := ParseEvents(auditdLogPath)
 	if err != nil {
-		log.Fatalf("failed to parse audit log: %v", err)
+		return fmt.Errorf("parsing audit log: %w", err)
 	}
 
-	// Load the Sigma ruleset
-	ruleset, err := sigma.NewRuleset(sigma.Config{
-		Directory: []string{rulePath},
-	})
+	ruleset, err := sigma.NewRuleset(sigma.Config{Directory: []string{rulePath}})
 	if err != nil {
-		log.Fatalf("failed to load ruleset: %v", err)
+		return fmt.Errorf("loading ruleset: %w", err)
 	}
 
-	// Make a list of sigma.Results called results
-	results := make([]sigma.Results, 0)
+	showProgress := outputType != "json" && outputType != "csv"
+	var bar *progressbar.ProgressBar
+	if showProgress {
+		bar = progressbar.Default(int64(len(events)))
+	}
 
-	if outputType == "json" {
-		var jsonResults []map[string]interface{}
-		for _, event := range events {
-			if result, match := ruleset.EvalAll(event); match {
-				results = append(results, result)
-				jsonResult := make(map[string]interface{})
-				jsonResult["Timestamp"] = event.Data["timestamp"]
-				jsonResult["AUID"] = event.Data["AUID"]
-				jsonResult["Exe"] = event.Data["exe"]
-				jsonResult["Terminal"] = event.Data["terminal"]
-				jsonResult["Pid"] = event.Data["pid"]
-				jsonResult["Tags"] = strings.Join(result[0].Tags, "-")
-				jsonResult["Author"] = result[0].Author
-				jsonResult["ID"] = result[0].ID
-				jsonResult["Title"] = result[0].Title
-
-				jsonResults = append(jsonResults, jsonResult)
-			}
+	var results []output.ScanResult
+	for _, event := range events {
+		if res, match := ruleset.EvalAll(event); match {
+			results = append(results, toScanResult(event, res))
 		}
-
-		jsonBytes, err := json.MarshalIndent(jsonResults, "", "  ")
-		if err != nil {
-			log.Fatalf("Failed to marshal results to JSON: %v", err)
-		}
-
-		fmt.Println(string(jsonBytes))
-		return string(jsonBytes)
-	} else if outputType == "csv" {
-		var csvData [][]string
-		csvHeader := []string{"Timestamp", "User", "Exe", "Terminal", "PID", "Tags", "Author", "ID", "Titles"}
-		csvData = append(csvData, csvHeader)
-
-		for _, event := range events {
-			if result, match := ruleset.EvalAll(event); match {
-				results = append(results, result)
-				csvData = append(csvData, []string{
-					event.Data["timestamp"],
-					event.Data["AUID"],
-					event.Data["exe"],
-					event.Data["terminal"],
-					event.Data["pid"],
-					strings.Join(result[0].Tags, "-"),
-					result[0].Author,
-					result[0].ID,
-					result[0].Title,
-				})
-			}
-		}
-		csvBytes := bytes.Buffer{}
-		csvWriter := csv.NewWriter(&csvBytes)
-		err := csvWriter.WriteAll(csvData)
-		if err != nil {
-			log.Fatalf("Failed to write CSV results: %v", err)
-		}
-
-		fmt.Println(csvBytes.String())
-		return csvBytes.String()
-	} else {
-		bar := progressbar.Default(int64(len(events)))
-
-		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Timestamp", "User", "Exe", "Terminal", "PID", "Tags", "Author"})
-		for _, event := range events {
-			if result, match := ruleset.EvalAll(event); match {
-				results = append(results, result)
-				table.Append([]string{
-					event.Data["timestamp"],
-					event.Data["AUID"],
-					event.Data["exe"],
-					event.Data["terminal"],
-					event.Data["pid"],
-					strings.Join(result[0].Tags, "-"),
-					result[0].Author,
-				})
-			}
+		if showProgress {
 			bar.Add(1)
 		}
-		table.Render()
+	}
+
+	if err := output.Write(os.Stdout, outputType, results, auditdRenderer); err != nil {
+		return fmt.Errorf("writing output: %w", err)
+	}
+	if showProgress {
 		fmt.Printf("Processed %d auditd events\n", len(events))
-		return results
+	}
+	return nil
+}
+
+// ChopToLog is like Chop but calls log.Fatalf on error, for use from main.
+func ChopToLog(rulePath, outputType, filePath string) {
+	if err := Chop(rulePath, outputType, filePath); err != nil {
+		log.Fatalf("auditd: %v", err)
 	}
 }
