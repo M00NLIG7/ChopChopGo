@@ -10,6 +10,7 @@ import (
 	"time"
 
 	sigma "github.com/M00NLIG7/go-sigma-rule-engine"
+	"github.com/M00NLIG7/ChopChopGo/maps/mapping"
 	"github.com/M00NLIG7/ChopChopGo/maps/output"
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	"github.com/schollz/progressbar/v3"
@@ -36,6 +37,20 @@ func (e JournaldEvent) Select(name string) (interface{}, bool) {
 	default:
 		return nil, false
 	}
+}
+
+// MappedJournaldEvent wraps a JournaldEvent with field-name translation so that
+// Sigma rules written with generic field names are resolved to journald-native
+// names before Select is called.
+type MappedJournaldEvent struct {
+	JournaldEvent
+	m *mapping.Mapping
+}
+
+func (e MappedJournaldEvent) Keywords() ([]string, bool) { return e.JournaldEvent.Keywords() }
+
+func (e MappedJournaldEvent) Select(name string) (interface{}, bool) {
+	return e.JournaldEvent.Select(e.m.Resolve(name))
 }
 
 // ParseEvents reads all entries from the live systemd journal.
@@ -107,9 +122,12 @@ func Chop(rulePath, outputType string) error {
 		bar = progressbar.Default(int64(len(events)))
 	}
 
+	m := mapping.LoadOrIdentity("mappings/journald.yml", "journald")
+
 	var results []output.ScanResult
 	for _, event := range events {
-		if res, match := ruleset.EvalAll(event); match {
+		mapped := MappedJournaldEvent{event, m}
+		if res, match := ruleset.EvalAll(mapped); match {
 			results = append(results, output.ScanResult{
 				Timestamp: event.Timestamp,
 				Message:   event.Message,

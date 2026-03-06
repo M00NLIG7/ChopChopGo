@@ -11,6 +11,7 @@ import (
 	"time"
 
 	sigma "github.com/M00NLIG7/go-sigma-rule-engine"
+	"github.com/M00NLIG7/ChopChopGo/maps/mapping"
 	"github.com/M00NLIG7/ChopChopGo/maps/output"
 	"github.com/schollz/progressbar/v3"
 )
@@ -53,6 +54,20 @@ func (e AuditEvent) Select(name string) (interface{}, bool) {
 		return value, true
 	}
 	return nil, false
+}
+
+// MappedAuditEvent wraps an AuditEvent with a field-name mapping so that
+// Sigma rules written with non-native field names (e.g. CommandLine → exe)
+// are resolved transparently before Select is called.
+type MappedAuditEvent struct {
+	AuditEvent
+	m *mapping.Mapping
+}
+
+func (e MappedAuditEvent) Keywords() ([]string, bool) { return e.AuditEvent.Keywords() }
+
+func (e MappedAuditEvent) Select(name string) (interface{}, bool) {
+	return e.AuditEvent.Select(e.m.Resolve(name))
 }
 
 // ParseEvents reads an auditd log file and returns the parsed events.
@@ -179,9 +194,12 @@ func Chop(rulePath, outputType, filePath string) error {
 		bar = progressbar.Default(int64(len(events)))
 	}
 
+	m := mapping.LoadOrIdentity("mappings/auditd.yml", "auditd")
+
 	var results []output.ScanResult
 	for _, event := range events {
-		if res, match := ruleset.EvalAll(event); match {
+		mapped := MappedAuditEvent{event, m}
+		if res, match := ruleset.EvalAll(mapped); match {
 			results = append(results, toScanResult(event, res))
 		}
 		if showProgress {

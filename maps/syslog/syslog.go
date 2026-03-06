@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	sigma "github.com/M00NLIG7/go-sigma-rule-engine"
+	"github.com/M00NLIG7/ChopChopGo/maps/mapping"
 	"github.com/M00NLIG7/ChopChopGo/maps/output"
 	"github.com/schollz/progressbar/v3"
 )
@@ -44,6 +45,20 @@ func (e SyslogEvent) Select(name string) (interface{}, bool) {
 	default:
 		return nil, false
 	}
+}
+
+// MappedSyslogEvent wraps a SyslogEvent with field-name translation so that
+// Sigma rules written with generic field names (e.g. Message, Hostname) are
+// resolved to syslog-native names before Select is called.
+type MappedSyslogEvent struct {
+	SyslogEvent
+	m *mapping.Mapping
+}
+
+func (e MappedSyslogEvent) Keywords() ([]string, bool) { return e.SyslogEvent.Keywords() }
+
+func (e MappedSyslogEvent) Select(name string) (interface{}, bool) {
+	return e.SyslogEvent.Select(e.m.Resolve(name))
 }
 
 // ParseEvents reads a syslog file and returns the parsed events.
@@ -141,9 +156,12 @@ func Chop(rulePath, outputType, filePath string) error {
 		bar = progressbar.Default(int64(len(events)))
 	}
 
+	m := mapping.LoadOrIdentity("mappings/syslog.yml", "syslog")
+
 	var results []output.ScanResult
 	for _, event := range events {
-		if res, match := ruleset.EvalAll(event); match {
+		mapped := MappedSyslogEvent{event, m}
+		if res, match := ruleset.EvalAll(mapped); match {
 			results = append(results, output.ScanResult{
 				Timestamp: event.Timestamp,
 				Message:   event.Message,
