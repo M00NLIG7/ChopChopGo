@@ -20,16 +20,6 @@ import (
 // Compiled once at package level to avoid per-line overhead.
 var timestampRe = regexp.MustCompile(`audit\((\d+)\.\d*:\d*\)`)
 
-// unquote strips surrounding double quotes from an auditd field value.
-// auditd wraps values that contain special characters in double quotes,
-// e.g. exe="/bin/cat" — we store the bare path so sigma rules match correctly.
-func unquote(s string) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
-
 // AuditEvent represents a single record from the auditd log.
 type AuditEvent struct {
 	Type string
@@ -70,6 +60,91 @@ func (e MappedAuditEvent) Select(name string) (interface{}, bool) {
 	return e.AuditEvent.Select(e.m.Resolve(name))
 }
 
+// parseLine tokenizes a single auditd log line into a key-value map.
+//
+// It walks the line once, character by character, respecting both double-quoted
+// and single-quoted values so fields like:
+//
+//	proctitle="bash -c rm -rf /"
+//	msg='op=PAM:authentication acct="root" res=failed'
+//
+// are stored correctly. This avoids the allocation overhead of strings.Split
+// and correctly handles spaces inside quoted values — a bug the old approach
+// could not fix without a much more complex regular expression.
+func parseLine(line string) map[string]string {
+	event := make(map[string]string, 16)
+	i, n := 0, len(line)
+
+	for i < n {
+		// Skip inter-field spaces.
+		for i < n && line[i] == ' ' {
+			i++
+		}
+		if i >= n {
+			break
+		}
+
+		// Read key (up to '=' or end of token).
+		keyStart := i
+		for i < n && line[i] != '=' && line[i] != ' ' {
+			i++
+		}
+		if i >= n || line[i] != '=' {
+			// No '=' — not a key=value token; skip.
+			for i < n && line[i] != ' ' {
+				i++
+			}
+			continue
+		}
+		key := line[keyStart:i]
+		i++ // consume '='
+
+		// Read value: double-quoted, single-quoted, or bare (until space).
+		var value string
+		if i < n && line[i] == '"' {
+			i++ // consume opening '"'
+			start := i
+			for i < n && line[i] != '"' {
+				i++
+			}
+			value = line[start:i]
+			if i < n {
+				i++ // consume closing '"'
+			}
+		} else if i < n && line[i] == '\'' {
+			i++ // consume opening '\''
+			start := i
+			for i < n && line[i] != '\'' {
+				i++
+			}
+			value = line[start:i]
+			if i < n {
+				i++ // consume closing '\''
+			}
+		} else {
+			start := i
+			for i < n && line[i] != ' ' {
+				i++
+			}
+			value = line[start:i]
+		}
+
+		// The msg field holds the audit timestamp, not a plain value.
+		if key == "msg" && len(value) > 6 && value[:6] == "audit(" {
+			matches := timestampRe.FindStringSubmatch(value)
+			if matches == nil {
+				continue
+			}
+			unixTime, _ := strconv.ParseInt(matches[1], 10, 64)
+			event["timestamp"] = time.Unix(unixTime, 0).UTC().Format(time.RFC3339)
+		} else {
+			event[key] = value
+		}
+	}
+
+	return event
+}
+
 // ParseEvents reads an auditd log file and returns the parsed events.
 func ParseEvents(logFile string) ([]AuditEvent, error) {
 	file, err := os.Open(logFile)
@@ -86,25 +161,7 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 			continue
 		}
 
-		event := make(map[string]string)
-		for _, part := range strings.Split(line, " ") {
-			kv := strings.SplitN(part, "=", 2)
-			if len(kv) != 2 {
-				continue
-			}
-			if kv[0] == "msg" && strings.HasPrefix(kv[1], "audit(") {
-				matches := timestampRe.FindStringSubmatch(kv[1])
-				if matches == nil {
-					// Malformed audit timestamp — skip this field, don't panic.
-					continue
-				}
-				unixTime, _ := strconv.ParseInt(matches[1], 10, 64)
-				event["timestamp"] = time.Unix(unixTime, 0).UTC().Format(time.RFC3339)
-			} else {
-				event[kv[0]] = unquote(kv[1])
-			}
-		}
-
+		event := parseLine(line)
 		if len(event) > 0 {
 			events = append(events, AuditEvent{Type: event["type"], Data: event})
 		}

@@ -174,19 +174,25 @@ func TestAuditEventKeywords(t *testing.T) {
 	}
 }
 
-func TestUnquote(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{`"/bin/cat"`, "/bin/cat"},
-		{`"sshd_config"`, "sshd_config"},
-		{`(null)`, "(null)"},
-		{`1000`, "1000"},
-		{`""`, ""},
-		{`"`, `"`},
-		{``, ``},
+func TestParseLineQuoting(t *testing.T) {
+	cases := []struct {
+		line string
+		key  string
+		want string
+	}{
+		// double-quoted value
+		{`type=SYSCALL msg=audit(0.000:1): exe="/bin/cat"`, "exe", "/bin/cat"},
+		// single-quoted value (USER_AUTH style)
+		{`type=USER_AUTH msg=audit(0.000:1): msg='op=PAM acct="root" res=failed'`, "msg", `op=PAM acct="root" res=failed`},
+		// unquoted value
+		{`type=SYSCALL msg=audit(0.000:1): pid=1234`, "pid", "1234"},
+		// bare parens — not a quote
+		{`type=SYSCALL msg=audit(0.000:1): exit=(null)`, "exit", "(null)"},
 	}
 	for _, c := range cases {
-		if got := unquote(c.in); got != c.want {
-			t.Errorf("unquote(%q) = %q, want %q", c.in, got, c.want)
+		event := parseLine(c.line)
+		if got := event[c.key]; got != c.want {
+			t.Errorf("parseLine key %q: got %q, want %q", c.key, got, c.want)
 		}
 	}
 }
@@ -239,5 +245,41 @@ func TestFindLogMissingFile(t *testing.T) {
 	_, err := FindLog("/nonexistent/path/to/audit.log")
 	if err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+// representativeLine is a realistic auditd SYSCALL line with quoted fields and
+// a long argument list — the kind of line the parser sees most often.
+const representativeLine = `type=SYSCALL msg=audit(1364481363.243:24287): arch=c000003e syscall=59 success=yes exit=0 a0=7f1234 a1=7f5678 a2=7f9abc a3=0 items=2 ppid=2686 pid=3538 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts0 ses=1 comm="bash" exe="/bin/bash" key="susp_exec"`
+
+// BenchmarkTokenizeParseLine measures the tokenizer-based parsing kernel.
+func BenchmarkTokenizeParseLine(b *testing.B) {
+	line := representativeLine
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseLine(line)
+	}
+}
+
+// BenchmarkParseEvents measures end-to-end throughput including file I/O on a
+// synthetic 10 000-line log so the absolute cost of a real scan is visible.
+func BenchmarkParseEvents(b *testing.B) {
+	// Build a large log file once outside the timer.
+	tmp := b.TempDir()
+	f := filepath.Join(tmp, "bench.log")
+	var sb strings.Builder
+	for i := 0; i < 10_000; i++ {
+		sb.WriteString(representativeLine)
+		sb.WriteByte('\n')
+	}
+	if err := os.WriteFile(f, []byte(sb.String()), 0600); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := ParseEvents(f); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
