@@ -2,45 +2,37 @@ package syslog
 
 import (
 	"bufio"
-	"bytes"
-	"encoding/csv"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"regexp"
 	"strings"
 
-	"github.com/M00NLIG7/go-sigma-rule-engine"
-	"github.com/olekukonko/tablewriter"
+	sigma "github.com/M00NLIG7/go-sigma-rule-engine"
+	"github.com/M00NLIG7/ChopChopGo/maps/output"
 	"github.com/schollz/progressbar/v3"
 )
 
-// Representation of syslog event
+// Compiled once at package level to avoid per-line overhead.
+var (
+	syslogRe  = regexp.MustCompile(`^([a-zA-Z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})`)
+	rsyslogRe = regexp.MustCompile(`^((-?(?:[1-9][0-9]*)?[0-9]{4})-(1[0-2]|0[1-9])-(3[01]|0[1-9]|[12][0-9])T(2[0-3]|[01][0-9]):([0-5][0-9]):([0-5][0-9])(\.[0-9]+)?(Z|[+-](?:2[0-3]|[01][0-9]):[0-5][0-9])?)`)
+)
+
+// SyslogEvent represents a parsed syslog entry.
 type SyslogEvent struct {
-	Facility  string
-	Severity  string
-	Message   string
+	Facility  string // hostname (closest available field without <PRI>)
+	Severity  string // not available in on-disk syslog format; kept for interface compat
+	Message   string // process[pid]: message text
 	Timestamp string
 }
 
-/*
-Keywords is a function required for a sigma.Event
-to be passed to sigma.Rulset.EvalAll
-
-Keywords returns a list of the different keys in our
-SyslogEvent struct.
-*/
+// Keywords satisfies the sigma.Event interface.
 func (e SyslogEvent) Keywords() ([]string, bool) {
 	return []string{e.Facility, e.Severity, e.Message}, true
 }
 
-/*
-Select is a function required for a sigma.Event
-to be passed to sigma.Rulset.EvalAll
-
-Select returns the value for a specified key
-*/
+// Select satisfies the sigma.Event interface.
 func (e SyslogEvent) Select(name string) (interface{}, bool) {
 	switch name {
 	case "facility":
@@ -54,10 +46,9 @@ func (e SyslogEvent) Select(name string) (interface{}, bool) {
 	}
 }
 
-/*
-ParseEvents interprets and parses the log file
-and builds a slice of SyslogEvent structs
-*/
+// ParseEvents reads a syslog file and returns the parsed events.
+// Lines that do not match a recognised timestamp format are skipped rather than
+// causing an error, so mixed or partial logs are handled gracefully.
 func ParseEvents(logFile string) ([]SyslogEvent, error) {
 	file, err := os.Open(logFile)
 	if err != nil {
@@ -65,156 +56,120 @@ func ParseEvents(logFile string) ([]SyslogEvent, error) {
 	}
 	defer file.Close()
 
-	events := make([]SyslogEvent, 0)
+	var events []SyslogEvent
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		syslogRegex := regexp.MustCompile(`^([a-zA-Z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})`)
-		rsyslogRegex := regexp.MustCompile(`^((-?(?:[1-9][0-9]*)?[0-9]{4})-(1[0-2]|0[1-9])-(3[01]|0[1-9]|[12][0-9])T(2[0-3]|[01][0-9]):([0-5][0-9]):([0-5][0-9])(\.[0-9]+)?(Z|[+-](?:2[0-3]|[01][0-9]):[0-5][0-9])?)`) // ISO 8601 timestamp written by rsyslog
-
-		syslogMatches := syslogRegex.FindStringSubmatch(line)
-		rsyslogMatches := rsyslogRegex.FindStringSubmatch(line)
-
 		var timestamp string
-		switch {
-		case syslogMatches != nil:
-			timestamp = syslogMatches[1]
-		case rsyslogMatches != nil:
-			timestamp = rsyslogMatches[1]
-		default:
-			return nil, fmt.Errorf("Failed to match timestamp")
-		}
-
-		parts := strings.SplitN(line, " ", 5)
-		if len(parts) != 5 {
+		if m := syslogRe.FindStringSubmatch(line); m != nil {
+			timestamp = m[1]
+		} else if m := rsyslogRe.FindStringSubmatch(line); m != nil {
+			timestamp = m[1]
+		} else {
+			// Skip lines we cannot parse — don't abort the whole scan.
 			continue
 		}
 
-		facility := strings.TrimSuffix(parts[0], ":")
-		severity := parts[1]
-		message := strings.TrimSpace(parts[4])
+		// Everything after the timestamp is "hostname proc[pid]: message".
+		// We store the hostname in Facility and the rest in Message so that
+		// keyword-based Sigma rules can match against process/message content.
+		rest := strings.TrimSpace(line[len(timestamp):])
+		var facility, message string
+		if idx := strings.IndexByte(rest, ' '); idx >= 0 {
+			facility = rest[:idx]
+			message = strings.TrimSpace(rest[idx+1:])
+		} else {
+			message = rest
+		}
+
 		events = append(events, SyslogEvent{
 			Facility:  facility,
-			Severity:  severity,
+			Severity:  "",
 			Message:   message,
 			Timestamp: timestamp,
 		})
 	}
-	return events, nil
+	return events, scanner.Err()
 }
 
+// FindLog returns filePath when non-empty, otherwise falls back to the
+// standard syslog locations.
 func FindLog(file string) (string, error) {
-	var syslogPath string
 	if file != "" {
-		_, err := os.Stat(file) // stat the given path; we are interested in the possible error, focusing on an ErrNotExist
-		if err != nil {
-			return "", fmt.Errorf("Failed to find provided file %v", file)
+		if _, err := os.Stat(file); err != nil {
+			return "", fmt.Errorf("failed to find provided file %v", file)
 		}
-		syslogPath = file
-	} else {
-		syslogPath = "/var/log/syslog"
-		if _, err := os.Stat(syslogPath); os.IsNotExist(err) {
-			syslogPath = "/var/log/messages"
+		return file, nil
+	}
+
+	for _, path := range []string{"/var/log/syslog", "/var/log/messages"} {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
 		}
 	}
-	return syslogPath, nil
+	return "", fmt.Errorf("no syslog file found at /var/log/syslog or /var/log/messages")
 }
 
-func Chop(rulePath string, outputType string, filePath string) interface{} {
-	// find the log file
+var syslogRenderer = output.Renderer{
+	Headers: []string{"Timestamp", "Message", "Tags", "Author"},
+	Row: func(r output.ScanResult) []string {
+		return []string{r.Timestamp, r.Message, output.TagString(r.Tags), r.Author}
+	},
+}
+
+// Chop scans the syslog against Sigma rules and writes results to stdout.
+func Chop(rulePath, outputType, filePath string) error {
 	syslogPath, err := FindLog(filePath)
 	if err != nil {
-		log.Fatalf("Failed to get syslog: %v", err)
+		return fmt.Errorf("finding syslog: %w", err)
 	}
 
-	// Parse the syslog events
 	events, err := ParseEvents(syslogPath)
 	if err != nil {
-		log.Fatalf("Failed to parse events: %v", err)
+		return fmt.Errorf("parsing syslog: %w", err)
 	}
 
-	// Load the Sigma ruleset
-	ruleset, err := sigma.NewRuleset(sigma.Config{
-		Directory: []string{rulePath},
-	})
+	ruleset, err := sigma.NewRuleset(sigma.Config{Directory: []string{rulePath}})
 	if err != nil {
-		log.Fatalf("Failed to load ruleset: %v", err)
+		return fmt.Errorf("loading ruleset: %w", err)
 	}
 
-	// Make a list of sigma.Results called results
-	results := make([]sigma.Results, 0)
+	showProgress := outputType != "json" && outputType != "csv"
+	var bar *progressbar.ProgressBar
+	if showProgress {
+		bar = progressbar.Default(int64(len(events)))
+	}
 
-	if outputType == "json" {
-		var jsonResults []map[string]interface{}
-		for _, event := range events {
-			if result, match := ruleset.EvalAll(event); match {
-				results = append(results, result)
-				jsonResult := make(map[string]interface{})
-				jsonResult["Timestamp"] = event.Timestamp
-				jsonResult["Message"] = event.Message
-				jsonResult["Tags"] = result[0].Tags
-				jsonResult["Author"] = result[0].Author
-				jsonResult["ID"] = result[0].ID
-				jsonResult["Title"] = result[0].Title
-				jsonResults = append(jsonResults, jsonResult)
-			}
-
+	var results []output.ScanResult
+	for _, event := range events {
+		if res, match := ruleset.EvalAll(event); match {
+			results = append(results, output.ScanResult{
+				Timestamp: event.Timestamp,
+				Message:   event.Message,
+				Tags:      res[0].Tags,
+				Author:    res[0].Author,
+				RuleID:    res[0].ID,
+				Title:     res[0].Title,
+			})
 		}
-
-		jsonBytes, err := json.MarshalIndent(jsonResults, "", "  ")
-		if err != nil {
-			log.Fatalf("Failed to marshal results to JSON: %v", err)
-		}
-
-		fmt.Println(string(jsonBytes))
-		return string(jsonBytes)
-	} else if outputType == "csv" {
-		var csvData [][]string
-		csvHeader := []string{"Timestamp", "Message", "Tags", "Author", "ID", "Title"}
-		csvData = append(csvData, csvHeader)
-
-		for _, event := range events {
-			if result, match := ruleset.EvalAll(event); match {
-				results = append(results, result)
-				csvData = append(csvData, []string{
-					event.Timestamp,
-					event.Message,
-					strings.Join(result[0].Tags, "-"),
-					result[0].Author,
-					result[0].ID,
-					result[0].Title,
-				})
-			}
-		}
-		csvBytes := bytes.Buffer{}
-		csvWriter := csv.NewWriter(&csvBytes)
-		err := csvWriter.WriteAll(csvData)
-		if err != nil {
-			log.Fatalf("Failed to write CSV results: %v", err)
-		}
-		fmt.Println(csvBytes.String())
-		return csvBytes.String()
-	} else {
-		bar := progressbar.Default(int64(len(events)))
-
-		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Timestamp", "Message", "Tags", "Author"})
-		for _, event := range events {
-			if result, match := ruleset.EvalAll(event); match {
-				results = append(results, result)
-				table.Append([]string{
-					event.Timestamp,
-					event.Message,
-					strings.Join(result[0].Tags, "-"),
-					result[0].Author,
-				})
-			}
+		if showProgress {
 			bar.Add(1)
 		}
-		table.Render()
+	}
 
+	if err := output.Write(os.Stdout, outputType, results, syslogRenderer); err != nil {
+		return fmt.Errorf("writing output: %w", err)
+	}
+	if showProgress {
 		fmt.Printf("Processed %d syslog events\n", len(events))
-		return results
+	}
+	return nil
+}
+
+// ChopToLog is like Chop but calls log.Fatalf on error, for use from main.
+func ChopToLog(rulePath, outputType, filePath string) {
+	if err := Chop(rulePath, outputType, filePath); err != nil {
+		log.Fatalf("syslog: %v", err)
 	}
 }
