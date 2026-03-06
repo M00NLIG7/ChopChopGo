@@ -1,0 +1,29 @@
+# Field mapping for auditd log sources.
+# Left side: Sigma rule field name.
+# Right side: auditd native field name as it appears in the log.
+source: auditd
+fields:
+  # Process
+  CommandLine:       exe
+  Image:             exe
+  ProcessId:         pid
+  ParentProcessId:   ppid
+  ParentImage:       comm
+
+  # Identity
+  User:              auid
+  LogonId:           ses
+
+  # Event metadata
+  EventType:         type
+  AuditKey:          key
+
+  # EXECVE arguments — sigma rules for auditd commonly reference these directly
+  # but map them here for rules written with generic names
+  a0:                a0
+  a1:                a1
+  a2:                a2
+  a3:                a3
+
+  # PATH record
+  TargetFilename:    name

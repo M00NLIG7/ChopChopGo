@@ -1,11 +1,18 @@
 # Build output
 ChopChopGo
 ChopChopGo.exe
+scripts/genlog/genlog
 
 # Go toolchain
 vendor/
 
-# Generated test logs (transient, regenerate with scripts/generate_test_logs.sh)
+# Test and profiling artifacts
+*.test
+coverage.out
+*.prof
+*.out
+
+# Generated test logs (transient, regenerate with scripts/genlog)
 testdata/generated_*.log
 
 # macOS

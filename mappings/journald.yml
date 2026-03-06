@@ -1,0 +1,7 @@
+# Field mapping for systemd journal log sources.
+# Left side: Sigma rule field name.
+# Right side: journald native field name as exposed by the JournaldEvent struct.
+source: journald
+fields:
+  Message:   message
+  Timestamp: timestamp

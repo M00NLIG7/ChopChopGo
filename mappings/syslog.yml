@@ -1,0 +1,11 @@
+# Field mapping for syslog log sources (including auth.log, kern.log, etc.)
+# Left side: Sigma rule field name.
+# Right side: syslog native field name as exposed by the SyslogEvent struct.
+source: syslog
+fields:
+  # Message body — most syslog Sigma rules match on this
+  Message:   message
+
+  # Hostname is stored in the Facility field (closest available without <PRI>)
+  Hostname:  facility
+  Computer:  facility
