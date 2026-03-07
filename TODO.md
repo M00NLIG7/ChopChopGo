@@ -91,15 +91,83 @@ Separately from the mapping layer, the current split-on-space field extraction i
 
 ### Implementation Checklist
 
-- [ ] `maps/mapping/mapping.go` — `Mapping` struct, `Load`, `Resolve`
-- [ ] `maps/mapping/mapping_test.go` — unit tests for load and resolve
-- [ ] `mappings/auditd.yml` — field translation table
-- [ ] `mappings/syslog.yml` — field translation table
-- [ ] `mappings/journald.yml` — field translation table
-- [ ] `MappedAuditEvent` wrapper in `maps/auditd/`
-- [ ] `MappedSyslogEvent` wrapper in `maps/syslog/`
-- [ ] `MappedJournaldEvent` wrapper in `maps/journald/`
-- [ ] Auto-discover mapping file in each `Chop()` function
+- [x] `maps/mapping/mapping.go` — `Mapping` struct, `Load`, `Resolve`
+- [x] `maps/mapping/mapping_test.go` — unit tests for load and resolve
+- [x] `mappings/auditd.yml` — field translation table
+- [x] `mappings/syslog.yml` — field translation table
+- [x] `mappings/journald.yml` — field translation table
+- [x] `MappedAuditEvent` wrapper in `maps/auditd/`
+- [x] `MappedSyslogEvent` wrapper in `maps/syslog/`
+- [x] `MappedJournaldEvent` wrapper in `maps/journald/`
+- [x] Auto-discover mapping file in each `Chop()` function
+- [x] Replace `strings.Split(line, " ")` with a quoted-KV tokenizer in auditd parser
 - [ ] `-mapping` CLI flag in `main.go`
 - [ ] Update `README.md` with mapping file docs
-- [ ] Replace `strings.Split(line, " ")` with a quoted-KV tokenizer in auditd parser
+
+---
+
+## auditd Event Correlation
+
+### Problem
+
+auditd writes multiple records per logical event, all sharing the same sequence
+number in the `msg=audit(timestamp:seq):` field:
+
+```
+type=SYSCALL msg=audit(1699950000.000:42): exe="/bin/bash" auid=1000 pid=1234
+type=EXECVE  msg=audit(1699950000.000:42): argc=2 a0="bash" a1="-c"
+type=CWD     msg=audit(1699950000.000:42): cwd="/home/user"
+type=PATH    msg=audit(1699950000.000:42): name="/etc/shadow"
+```
+
+ChopChopGo currently parses each line as an independent event. When a Sigma
+rule matches on the PATH record (e.g., access to `/etc/shadow`), the result
+row shows empty `Exe`, `User`, and `Terminal` columns — because those fields
+live on the SYSCALL record, not the PATH record.
+
+**This is not a parser bug.** The fields are genuinely absent from the PATH
+record type. However, it produces confusing output with blank columns and
+creates duplicate alerts (the same logical event can trigger the rule multiple
+times across its correlated records).
+
+### Proposed Fix: Record Grouping
+
+After parsing all lines, group records that share the same sequence number and
+merge their fields into a single composite event map before passing to sigma:
+
+```go
+// Group by sequence number extracted from msg=audit(ts:seq):
+groups := map[string]map[string]string{}
+for _, event := range rawEvents {
+    seq := event.Data["seq"] // extracted during tokenization
+    if groups[seq] == nil {
+        groups[seq] = map[string]string{}
+    }
+    for k, v := range event.Data {
+        if _, exists := groups[seq][k]; !exists {
+            groups[seq][k] = v // first record wins for duplicate keys
+        }
+    }
+}
+```
+
+The merged event has all fields from all correlated records, so Sigma rules
+see a complete picture and result rows are fully populated.
+
+### Considerations
+
+- The sequence number must be extracted during tokenization (add `seq` key)
+- Within a group, SYSCALL fields (exe, auid, pid) should take precedence over
+  EXECVE/PATH fields for duplicate keys — first-record-wins works because
+  SYSCALL always appears first in the log
+- Memory: grouping buffers the entire file in memory anyway (already the case)
+- Multi-event logs with millions of records may need streaming grouping
+
+### Checklist
+
+- [ ] Extract `seq` from `msg=audit(ts:seq):` during tokenization
+- [ ] Group raw records by `seq` in `ParseEvents`
+- [ ] Merge field maps within each group (SYSCALL fields win on collision)
+- [ ] Evaluate sigma rules against merged composite events
+- [ ] Update `toScanResult` to read fields from merged event
+- [ ] Add test: multi-record event yields single merged result with all fields
