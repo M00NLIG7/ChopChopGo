@@ -132,11 +132,6 @@ var (
 
 // ─── Auditd ──────────────────────────────────────────────────────────────────
 
-// generateAuditd produces `count` logical events. Each event is a correlated
-// group of records (SYSCALL + EXECVE + CWD + optional PATH) all sharing the
-// same seq number, mirroring what real auditd writes. This lets the parser's
-// event-correlation logic merge the records into one complete event so output
-// rows have fully populated columns.
 func generateAuditd(rng *rand.Rand, start time.Time, count int, ratio float64) ([]entry, time.Time) {
 	cur := start
 	seq := 1000 + rng.Intn(500)
@@ -147,13 +142,13 @@ func generateAuditd(rng *rand.Rand, start time.Time, count int, ratio float64) (
 		seq += rng.Intn(3) + 1
 		ts := cur.Unix()
 
-		var group []entry
+		var e entry
 		if rng.Float64() < ratio {
-			group = auditdSuspicious(rng, ts, seq)
+			e = auditdSuspicious(rng, ts, seq)
 		} else {
-			group = auditdBenign(rng, ts, seq)
+			e = auditdBenign(rng, ts, seq)
 		}
-		entries = append(entries, group...)
+		entries = append(entries, e)
 	}
 	return entries, cur
 }
@@ -163,121 +158,129 @@ func auditField(ts int64, seq int, typ, fields string) string {
 		typ, ts, 0, seq, fields)
 }
 
-// auditdBenign emits a correlated group of records for one normal file-access
-// or authentication event.
-func auditdBenign(rng *rand.Rand, ts int64, seq int) []entry {
+func auditdBenign(rng *rand.Rand, ts int64, seq int) entry {
 	pid := randPID(rng)
-	ppid := randPID(rng)
 	uid := rng.Intn(2) * 1000 // 0 or 1000
 
-	// Auth events are inherently single-record.
-	if rng.Intn(4) == 0 {
-		line := auditField(ts, seq, "USER_AUTH", fmt.Sprintf(
+	type tmpl struct{ typ, fields string }
+	templates := []tmpl{
+		// Normal file reads
+		{"SYSCALL", fmt.Sprintf(
+			"arch=c000003e syscall=2 success=yes exit=3 ppid=%d pid=%d auid=%d uid=%d gid=%d euid=%d suid=%d fsuid=%d egid=%d sgid=%d fsgid=%d tty=pts0 ses=1 comm=%q exe=%q key=(null)",
+			randPID(rng), pid, uid, uid, uid, uid, uid, uid, uid, uid, uid,
+			pick(rng, []string{"cat", "ls", "grep", "stat", "head"}),
+			pick(rng, []string{"/bin/cat", "/bin/ls", "/bin/grep", "/usr/bin/stat"}),
+		)},
+		// Normal EXECVE
+		{"EXECVE", fmt.Sprintf(
+			"argc=1 a0=%q pid=%d auid=%d",
+			pick(rng, []string{"run-parts", "systemctl", "apt-check", "logrotate", "update-notifier"}),
+			pid, uid,
+		)},
+		// Normal PATH
+		{"PATH", fmt.Sprintf(
+			"item=0 name=%s inode=%d dev=fd:00 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL",
+			pick(rng, []string{"/etc/hosts", "/etc/resolv.conf", "/var/log/syslog", "/etc/crontab", "/proc/cpuinfo"}),
+			rng.Intn(999999)+1000,
+		)},
+		// Successful auth
+		{"USER_AUTH", fmt.Sprintf(
 			"pid=%d uid=0 auid=4294967295 ses=4294967295 msg='op=PAM:authentication acct=%q exe=\"/usr/sbin/sshd\" hostname=%s addr=%s terminal=ssh res=success'",
-			pid, pick(rng, usernames), pick(rng, srcIPs), pick(rng, srcIPs),
-		))
-		return []entry{{line: line}}
+			pid,
+			pick(rng, usernames),
+			pick(rng, srcIPs),
+			pick(rng, srcIPs),
+		)},
+		// Normal CWD
+		{"CWD", fmt.Sprintf(
+			"cwd=%q",
+			pick(rng, []string{"/home/alice", "/root", "/var/log", "/tmp", "/opt/app"}),
+		)},
 	}
 
-	comm := pick(rng, []string{"cat", "ls", "grep", "stat", "head", "find"})
-	exe := pick(rng, []string{"/bin/cat", "/bin/ls", "/bin/grep", "/usr/bin/stat", "/usr/bin/find"})
-	target := pick(rng, []string{"/etc/hosts", "/etc/resolv.conf", "/var/log/syslog", "/etc/crontab", "/proc/uptime"})
-	cwd := pick(rng, []string{"/home/alice", "/root", "/var/log", "/tmp", "/opt/app"})
-
-	syscall := auditField(ts, seq, "SYSCALL", fmt.Sprintf(
-		"arch=c000003e syscall=2 success=yes exit=3 ppid=%d pid=%d auid=%d uid=%d gid=%d euid=%d suid=%d fsuid=%d egid=%d sgid=%d fsgid=%d tty=pts0 ses=1 comm=%q exe=%q key=(null)",
-		ppid, pid, uid, uid, uid, uid, uid, uid, uid, uid, uid, comm, exe,
-	))
-	execve := auditField(ts, seq, "EXECVE", fmt.Sprintf(
-		"argc=2 a0=%q a1=%q", comm, target,
-	))
-	cwdRec := auditField(ts, seq, "CWD", fmt.Sprintf("cwd=%q", cwd))
-	path := auditField(ts, seq, "PATH", fmt.Sprintf(
-		"item=0 name=%s inode=%d dev=fd:00 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL",
-		target, rng.Intn(999999)+1000,
-	))
-
-	return []entry{
-		{line: syscall},
-		{line: execve},
-		{line: cwdRec},
-		{line: path},
-	}
+	chosen := templates[rng.Intn(len(templates))]
+	return entry{line: auditField(ts, seq, chosen.typ, chosen.fields)}
 }
 
-// auditdSuspicious emits a correlated group of records for one suspicious event.
-// The first record (SYSCALL) carries the rule tag; subsequent records are
-// supplementary and share the same seq so they merge into the same event.
-func auditdSuspicious(rng *rand.Rand, ts int64, seq int) []entry {
+func auditdSuspicious(rng *rand.Rand, ts int64, seq int) entry {
 	pid := randPID(rng)
-	ppid := randPID(rng)
 	auid := 1000 + rng.Intn(3)
 
 	type suspTmpl struct {
-		comm, exe, execveArgs, pathName, rule string
+		typ, fields, rule string
 	}
 
 	templates := []suspTmpl{
-		// lnx_auditd_susp_c2_commands — reverse shell tools
+		// lnx_auditd_susp_c2_commands
 		{
-			comm: pick(rng, []string{"nc", "ncat", "socat", "nmap", "base64"}),
-			exe:  pick(rng, []string{"/bin/nc", "/usr/bin/ncat", "/usr/bin/socat", "/usr/bin/nmap", "/usr/bin/base64"}),
-			execveArgs: fmt.Sprintf("argc=3 a0=%q a1=%q a2=%q",
-				pick(rng, []string{"nc", "ncat", "socat"}),
-				pick(rng, srcIPs),
-				fmt.Sprintf("%d", 4000+rng.Intn(1000)),
+			"SYSCALL",
+			fmt.Sprintf(
+				"arch=c000003e syscall=59 success=yes exit=0 ppid=%d pid=%d auid=%d uid=%d gid=%d euid=%d suid=%d fsuid=%d egid=%d sgid=%d fsgid=%d tty=pts1 ses=3 comm=%q exe=%q key=susp_activity",
+				randPID(rng), pid, auid, auid, auid, auid, auid, auid, auid, auid, auid,
+				pick(rng, []string{"nc", "wget", "curl", "nmap", "socat", "ncat", "ssh", "base64"}),
+				pick(rng, []string{"/bin/nc", "/usr/bin/wget", "/usr/bin/curl", "/usr/bin/nmap", "/usr/bin/socat", "/usr/bin/ncat", "/usr/bin/ssh", "/usr/bin/base64"}),
 			),
-			pathName: "",
-			rule:     "lnx_auditd_susp_c2_commands",
+			"lnx_auditd_susp_c2_commands",
 		},
-		// lnx_auditd_system_info_discovery
+		// lnx_auditd_system_info_discovery (EXECVE)
 		{
-			comm:       pick(rng, []string{"uname", "hostname", "lsmod", "env"}),
-			exe:        pick(rng, []string{"/usr/bin/uname", "/usr/bin/hostname", "/sbin/lsmod", "/usr/bin/env"}),
-			execveArgs: fmt.Sprintf("argc=2 a0=%q a1=%q", pick(rng, []string{"uname", "hostname"}), pick(rng, []string{"-a", "-r", "--all"})),
-			pathName:   pick(rng, []string{"/etc/lsb-release", "/etc/redhat-release", "/etc/issue", "/proc/cpuinfo"}),
-			rule:       "lnx_auditd_system_info_discovery",
+			"EXECVE",
+			fmt.Sprintf(
+				"argc=%d a0=%s a1=%s pid=%d auid=%d",
+				rng.Intn(2)+1,
+				pick(rng, []string{"uname", "hostname", "uptime", "env", "lsmod"}),
+				pick(rng, []string{"-a", "-r", "--all", ""}),
+				pid, auid,
+			),
+			"lnx_auditd_system_info_discovery",
 		},
-		// lnx_auditd_password_policy_discovery
+		// lnx_auditd_system_info_discovery (PATH)
 		{
-			comm:       pick(rng, []string{"chage", "passwd"}),
-			exe:        pick(rng, []string{"/usr/bin/chage", "/usr/bin/passwd"}),
-			execveArgs: fmt.Sprintf("argc=3 a0=chage a1=%q a2=%q", pick(rng, []string{"--list", "-l"}), pick(rng, usernames)),
-			pathName:   pick(rng, []string{"/etc/login.defs", "/etc/pam.d/common-auth", "/etc/shadow", "/etc/security/pwquality.conf"}),
-			rule:       "lnx_auditd_password_policy_discovery",
+			"PATH",
+			fmt.Sprintf(
+				"item=0 name=%s inode=%d dev=fd:00 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL",
+				pick(rng, []string{"/etc/lsb-release", "/etc/redhat-release", "/etc/issue"}),
+				rng.Intn(999999)+1000,
+			),
+			"lnx_auditd_system_info_discovery",
 		},
-		// lnx_auditd_schedule_task_job_cron
+		// lnx_auditd_password_policy_discovery (PATH)
 		{
-			comm:       "crontab",
-			exe:        "/usr/bin/crontab",
-			execveArgs: fmt.Sprintf("argc=2 a0=crontab a1=%q", pick(rng, []string{"-e", "-l", "-r"})),
-			pathName:   fmt.Sprintf("/var/spool/cron/crontabs/%s", pick(rng, usernames)),
-			rule:       "lnx_auditd_schedule_task_job_cron",
+			"PATH",
+			fmt.Sprintf(
+				"item=0 name=%s inode=%d dev=fd:00 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL",
+				pick(rng, []string{"/etc/login.defs", "/etc/pam.d/common-auth", "/etc/pam.d/common-password", "/etc/security/pwquality.conf"}),
+				rng.Intn(999999)+1000,
+			),
+			"lnx_auditd_password_policy_discovery",
+		},
+		// lnx_auditd_password_policy_discovery (EXECVE chage)
+		{
+			"EXECVE",
+			fmt.Sprintf(
+				"argc=3 a0=chage a1=%s a2=%s pid=%d auid=%d",
+				pick(rng, []string{"--list", "-l"}),
+				pick(rng, usernames),
+				pid, auid,
+			),
+			"lnx_auditd_password_policy_discovery",
+		},
+		// lnx_auditd_password_policy_discovery (EXECVE passwd)
+		{
+			"EXECVE",
+			fmt.Sprintf("argc=2 a0=passwd a1=%s pid=%d auid=%d",
+				pick(rng, []string{"-S", "--status"}),
+				pid, auid,
+			),
+			"lnx_auditd_password_policy_discovery",
 		},
 	}
 
-	t := templates[rng.Intn(len(templates))]
-
-	syscall := auditField(ts, seq, "SYSCALL", fmt.Sprintf(
-		"arch=c000003e syscall=59 success=yes exit=0 ppid=%d pid=%d auid=%d uid=%d gid=%d euid=%d suid=%d fsuid=%d egid=%d sgid=%d fsgid=%d tty=pts1 ses=3 comm=%q exe=%q key=susp_activity",
-		ppid, pid, auid, auid, auid, auid, auid, auid, auid, auid, auid, t.comm, t.exe,
-	))
-	execve := auditField(ts, seq, "EXECVE", t.execveArgs)
-	cwd := auditField(ts, seq, "CWD", fmt.Sprintf("cwd=%q", pick(rng, []string{"/tmp", "/root", "/home/user", "/var/tmp"})))
-
-	group := []entry{
-		{line: syscall, rule: t.rule}, // only first record carries the tag
-		{line: execve},
-		{line: cwd},
+	chosen := templates[rng.Intn(len(templates))]
+	return entry{
+		line: auditField(ts, seq, chosen.typ, chosen.fields),
+		rule: chosen.rule,
 	}
-	if t.pathName != "" {
-		path := auditField(ts, seq, "PATH", fmt.Sprintf(
-			"item=0 name=%s inode=%d dev=fd:00 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL",
-			t.pathName, rng.Intn(999999)+1000,
-		))
-		group = append(group, entry{line: path})
-	}
-	return group
 }
 
 // ─── Syslog ──────────────────────────────────────────────────────────────────
