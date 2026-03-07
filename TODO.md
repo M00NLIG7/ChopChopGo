@@ -165,9 +165,9 @@ see a complete picture and result rows are fully populated.
 
 ### Checklist
 
-- [ ] Extract `seq` from `msg=audit(ts:seq):` during tokenization
-- [ ] Group raw records by `seq` in `ParseEvents`
-- [ ] Merge field maps within each group (SYSCALL fields win on collision)
-- [ ] Evaluate sigma rules against merged composite events
-- [ ] Update `toScanResult` to read fields from merged event
-- [ ] Add test: multi-record event yields single merged result with all fields
+- [x] Extract `seq` from `msg=audit(ts:seq):` during tokenization
+- [x] Group raw records by `seq` in `ParseEvents`
+- [x] Merge field maps within each group (SYSCALL fields win on collision)
+- [x] Evaluate sigma rules against merged composite events
+- [x] Update `toScanResult` to read fields from merged event
+- [x] Add test: multi-record event yields single merged result with all fields

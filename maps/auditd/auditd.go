@@ -16,9 +16,10 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-// timestampRe extracts the Unix second from an audit(SSSS.mmm:ID) token.
+// msgRe extracts the Unix second and sequence number from an audit(SSSS.mmm:SEQ) token.
+// Both captures are used: the timestamp for display and the seq for event correlation.
 // Compiled once at package level to avoid per-line overhead.
-var timestampRe = regexp.MustCompile(`audit\((\d+)\.\d*:\d*\)`)
+var msgRe = regexp.MustCompile(`audit\((\d+)\.\d*:(\d+)\)`)
 
 // AuditEvent represents a single record from the auditd log.
 type AuditEvent struct {
@@ -129,14 +130,15 @@ func parseLine(line string) map[string]string {
 			value = line[start:i]
 		}
 
-		// The msg field holds the audit timestamp, not a plain value.
+		// The msg field holds the audit timestamp and sequence number.
 		if key == "msg" && len(value) > 6 && value[:6] == "audit(" {
-			matches := timestampRe.FindStringSubmatch(value)
+			matches := msgRe.FindStringSubmatch(value)
 			if matches == nil {
 				continue
 			}
 			unixTime, _ := strconv.ParseInt(matches[1], 10, 64)
 			event["timestamp"] = time.Unix(unixTime, 0).UTC().Format(time.RFC3339)
+			event["seq"] = matches[2]
 		} else {
 			event[key] = value
 		}
@@ -145,7 +147,17 @@ func parseLine(line string) map[string]string {
 	return event
 }
 
-// ParseEvents reads an auditd log file and returns the parsed events.
+// ParseEvents reads an auditd log file, correlates multi-record events by their
+// sequence number, and returns one merged AuditEvent per logical event.
+//
+// auditd writes several record types (SYSCALL, EXECVE, CWD, PATH, …) for a
+// single kernel event, all sharing the same msg=audit(ts:seq) sequence number.
+// Merging them gives Sigma rules a complete field set — exe, auid, name, cwd —
+// in a single event, eliminating blank columns and duplicate rule hits.
+//
+// Field precedence within a group: first record wins. SYSCALL is always
+// written before EXECVE/CWD/PATH so SYSCALL fields (exe, auid, pid) take
+// priority over the same-named fields on later record types.
 func ParseEvents(logFile string) ([]AuditEvent, error) {
 	file, err := os.Open(logFile)
 	if err != nil {
@@ -153,7 +165,13 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 	}
 	defer file.Close()
 
-	events := make([]AuditEvent, 0)
+	// seqOrder tracks insertion order so output preserves log order.
+	var seqOrder []string
+	// groups maps seq → merged field map. Key "" is used for records with no
+	// valid audit(ts:seq) token; each such record gets its own unique slot.
+	groups := make(map[string]map[string]string)
+	standalone := 0
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -161,12 +179,40 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 			continue
 		}
 
-		event := parseLine(line)
-		if len(event) > 0 {
-			events = append(events, AuditEvent{Type: event["type"], Data: event})
+		data := parseLine(line)
+		if len(data) == 0 {
+			continue
+		}
+
+		seq := data["seq"]
+		if seq == "" {
+			// Record has no parseable sequence — treat as its own event.
+			seq = fmt.Sprintf("__solo_%d", standalone)
+			standalone++
+		}
+
+		if _, exists := groups[seq]; !exists {
+			seqOrder = append(seqOrder, seq)
+			groups[seq] = make(map[string]string, len(data))
+		}
+
+		g := groups[seq]
+		for k, v := range data {
+			if _, exists := g[k]; !exists {
+				g[k] = v // first record wins
+			}
 		}
 	}
-	return events, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	events := make([]AuditEvent, 0, len(seqOrder))
+	for _, seq := range seqOrder {
+		g := groups[seq]
+		events = append(events, AuditEvent{Type: g["type"], Data: g})
+	}
+	return events, nil
 }
 
 // FindLog returns filePath when non-empty, otherwise reads /etc/audit/auditd.conf

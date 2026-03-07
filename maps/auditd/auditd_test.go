@@ -15,9 +15,10 @@ func TestParseEventsStandard(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// File has 5 type= lines; non-type lines must be skipped
-	if len(events) != 5 {
-		t.Errorf("expected 5 events, got %d", len(events))
+	// 5 type= lines but lines 1-3 share seq 24287 and are merged into one.
+	// Expected logical events: seq 24287, 24288, 24289 → 3 total.
+	if len(events) != 3 {
+		t.Errorf("expected 3 correlated events, got %d", len(events))
 	}
 
 	first := events[0]
@@ -35,6 +36,54 @@ func TestParseEventsStandard(t *testing.T) {
 	}
 	if first.Data["timestamp"] == "" {
 		t.Error("expected non-empty timestamp")
+	}
+	// Fields from the correlated CWD and PATH records should be merged in.
+	if first.Data["cwd"] != "/home/user" {
+		t.Errorf("expected cwd=/home/user (merged from CWD record), got %q", first.Data["cwd"])
+	}
+	if first.Data["name"] != "/etc/ssh/sshd_config" {
+		t.Errorf("expected name=/etc/ssh/sshd_config (merged from PATH record), got %q", first.Data["name"])
+	}
+}
+
+func TestParseEventsCorrelation(t *testing.T) {
+	tmp := t.TempDir()
+	f := filepath.Join(tmp, "corr.log")
+	// Three records sharing seq 99 — fields from later records fill in gaps.
+	content := "" +
+		"type=SYSCALL msg=audit(1000000000.000:99): pid=42 auid=1000 exe=\"/bin/bash\"\n" +
+		"type=EXECVE  msg=audit(1000000000.000:99): argc=2 a0=\"bash\" a1=\"-i\"\n" +
+		"type=CWD     msg=audit(1000000000.000:99): cwd=\"/root\"\n" +
+		// Unrelated record with a different seq.
+		"type=SYSCALL msg=audit(1000000001.000:100): pid=7 auid=0 exe=\"/usr/bin/id\"\n"
+	if err := os.WriteFile(f, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := ParseEvents(f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 correlated events, got %d", len(events))
+	}
+
+	e := events[0]
+	if e.Type != "SYSCALL" {
+		t.Errorf("first event type: got %q, want SYSCALL", e.Type)
+	}
+	if e.Data["exe"] != "/bin/bash" {
+		t.Errorf("exe: got %q, want /bin/bash", e.Data["exe"])
+	}
+	if e.Data["argc"] != "2" {
+		t.Errorf("argc (from EXECVE): got %q, want 2", e.Data["argc"])
+	}
+	if e.Data["cwd"] != "/root" {
+		t.Errorf("cwd (from CWD): got %q, want /root", e.Data["cwd"])
+	}
+	// SYSCALL exe must win over any exe on later records.
+	if events[1].Data["exe"] != "/usr/bin/id" {
+		t.Errorf("second event exe: got %q, want /usr/bin/id", events[1].Data["exe"])
 	}
 }
 
