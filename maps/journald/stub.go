@@ -7,14 +7,14 @@ import (
 	"log"
 )
 
-// Chop is not supported on Windows because journald is Linux-only.
-func Chop(rulePath, outputType string) error {
-	return fmt.Errorf("journald is not supported on Windows")
+// Chop is not supported on non-Linux platforms because journald is Linux-only.
+func Chop(rulePath, outputType, mappingPath string) error {
+	return fmt.Errorf("journald is not supported on this platform")
 }
 
 // ChopToLog is like Chop but calls log.Fatalf on error, for use from main.
-func ChopToLog(rulePath, outputType string) {
-	if err := Chop(rulePath, outputType); err != nil {
+func ChopToLog(rulePath, outputType, mappingPath string) {
+	if err := Chop(rulePath, outputType, mappingPath); err != nil {
 		log.Fatalf("journald: %v", err)
 	}
 }

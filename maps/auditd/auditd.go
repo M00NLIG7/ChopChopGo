@@ -275,7 +275,8 @@ func toScanResult(event AuditEvent, res sigma.Results) output.ScanResult {
 }
 
 // Chop scans the auditd log against Sigma rules and writes results to stdout.
-func Chop(rulePath, outputType, filePath string) error {
+// mappingPath overrides the default mappings/auditd.yml when non-empty.
+func Chop(rulePath, outputType, filePath, mappingPath string) error {
 	auditdLogPath, err := FindLog(filePath)
 	if err != nil {
 		return fmt.Errorf("finding audit log: %w", err)
@@ -297,7 +298,10 @@ func Chop(rulePath, outputType, filePath string) error {
 		bar = progressbar.Default(int64(len(events)))
 	}
 
-	m := mapping.LoadOrIdentity("mappings/auditd.yml", "auditd")
+	if mappingPath == "" {
+		mappingPath = "mappings/auditd.yml"
+	}
+	m := mapping.LoadOrIdentity(mappingPath, "auditd")
 
 	var results []output.ScanResult
 	for _, event := range events {
@@ -320,8 +324,8 @@ func Chop(rulePath, outputType, filePath string) error {
 }
 
 // ChopToLog is like Chop but calls log.Fatalf on error, for use from main.
-func ChopToLog(rulePath, outputType, filePath string) {
-	if err := Chop(rulePath, outputType, filePath); err != nil {
+func ChopToLog(rulePath, outputType, filePath, mappingPath string) {
+	if err := Chop(rulePath, outputType, filePath, mappingPath); err != nil {
 		log.Fatalf("auditd: %v", err)
 	}
 }

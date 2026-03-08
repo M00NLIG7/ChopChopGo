@@ -134,7 +134,8 @@ var syslogRenderer = output.Renderer{
 }
 
 // Chop scans the syslog against Sigma rules and writes results to stdout.
-func Chop(rulePath, outputType, filePath string) error {
+// mappingPath overrides the default mappings/syslog.yml when non-empty.
+func Chop(rulePath, outputType, filePath, mappingPath string) error {
 	syslogPath, err := FindLog(filePath)
 	if err != nil {
 		return fmt.Errorf("finding syslog: %w", err)
@@ -156,7 +157,10 @@ func Chop(rulePath, outputType, filePath string) error {
 		bar = progressbar.Default(int64(len(events)))
 	}
 
-	m := mapping.LoadOrIdentity("mappings/syslog.yml", "syslog")
+	if mappingPath == "" {
+		mappingPath = "mappings/syslog.yml"
+	}
+	m := mapping.LoadOrIdentity(mappingPath, "syslog")
 
 	var results []output.ScanResult
 	for _, event := range events {
@@ -186,8 +190,8 @@ func Chop(rulePath, outputType, filePath string) error {
 }
 
 // ChopToLog is like Chop but calls log.Fatalf on error, for use from main.
-func ChopToLog(rulePath, outputType, filePath string) {
-	if err := Chop(rulePath, outputType, filePath); err != nil {
+func ChopToLog(rulePath, outputType, filePath, mappingPath string) {
+	if err := Chop(rulePath, outputType, filePath, mappingPath); err != nil {
 		log.Fatalf("syslog: %v", err)
 	}
 }

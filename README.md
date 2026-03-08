@@ -67,11 +67,21 @@ You might need to install the development files for systemd (e. g. `apt-get inst
 #### Command Examples
 
 ```bash
-./ChopChopGo # Defaults to searching through syslog 
-./ChopChopGo -target auditd -rules ./rules/linux/auditd/ -file /opt/evidence/auditd.log # This searches through auditd log with the official sigma rules
-./ChopChopGo -target journald -rules ./rules/linux/builtin/ # This searches through journald with specified rules
+# Defaults to searching through syslog
+./ChopChopGo
+
+# Scan an auditd log with the official sigma rules
+./ChopChopGo -target auditd -rules ./rules/linux/auditd/ -file /opt/evidence/auditd.log
+
+# Scan journald with specified rules
+./ChopChopGo -target journald -rules ./rules/linux/builtin/
+
+# Use a custom field-mapping file
+./ChopChopGo -target auditd -rules ./rules/linux/auditd/ -mapping ./my-mappings/auditd.yml
 ```
+
 #### Alternative Output Formats
+
 You may wish to use ChopChopGo in an automated fashion. The CSV and JSON output options are useful for this purpose. With both of these options, the header and progress statistics are not printed to the console.
 The alternative output format is written to stdout - you can process it from there (e. g. write it to a file for later use).
 
@@ -80,11 +90,43 @@ Each option can be specified using the `-out` parameter.
 ##### CSV
 
 ```bash
-./ChopChopGo -target sylog -rules ./rules/linux/builtin/syslog/ -out csv # This searches through syslog with the official sigma rules, then outputs the data in CSV format
+./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/ -out csv
 ```
+
 ##### JSON
+
 ```bash
-./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/ -out json # This searches through syslog with the official sigma rules, then outputs the data as JSON
+./ChopChopGo -target syslog -rules ./rules/linux/builtin/syslog/ -out json
+```
+
+### Field Mapping
+
+ChopChopGo translates Sigma rule field names to log-native field names via YAML mapping files in `mappings/`:
+
+```
+mappings/
+  auditd.yml    # CommandLine→exe, Image→exe, ProcessId→pid, User→auid …
+  syslog.yml    # Message→message, Hostname→facility …
+  journald.yml  # Message→message, Timestamp→timestamp …
+```
+
+These are loaded automatically based on the `-target`. If a mapping file is absent the tool falls back to pass-through (field names used verbatim), so existing behaviour is unchanged.
+
+To supply your own mapping file — for example to run community rules written for a different schema — use the `-mapping` flag:
+
+```bash
+./ChopChopGo -target auditd -rules ./rules/ -mapping ./mappings/custom-auditd.yml
+```
+
+A mapping file looks like this:
+
+```yaml
+source: auditd
+fields:
+  CommandLine: exe      # Sigma field → auditd native field
+  Image:       exe
+  ProcessId:   pid
+  User:        auid
 ```
 
 ### Updating Sigma Rules

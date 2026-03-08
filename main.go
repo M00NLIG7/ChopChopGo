@@ -31,11 +31,13 @@ func main() {
 	var path string
 	var outputType string
 	var file string
+	var mappingPath string
 
 	flag.StringVar(&target, "target", "syslog", "what type of data is to be scanned (auditd, journald, syslog)")
 	flag.StringVar(&path, "rules", "rules/linux/builtin/syslog", "where to pull the yaml rules you're applying")
 	flag.StringVar(&outputType, "out", "", "what type of output you want (csv, json, or leave empty for table)")
 	flag.StringVar(&file, "file", "", "which specific file should be scanned (falls back to target-specific defaults when left empty)")
+	flag.StringVar(&mappingPath, "mapping", "", "path to a custom field-mapping YAML file (overrides the built-in mappings/<target>.yml)")
 
 	flag.Parse()
 
@@ -57,15 +59,15 @@ func main() {
 
 	switch target {
 	case "auditd":
-		auditd.ChopToLog(path, outputType, file)
+		auditd.ChopToLog(path, outputType, file, mappingPath)
 	case "syslog":
-		syslog.ChopToLog(path, outputType, file)
+		syslog.ChopToLog(path, outputType, file, mappingPath)
 	case "journald":
 		if file != "" {
 			fmt.Fprintln(os.Stderr, "Error: the journald target does not support -file; journald uses a binary format accessible only via the systemd API.")
 			os.Exit(1)
 		}
-		journald.ChopToLog(path, outputType)
+		journald.ChopToLog(path, outputType, mappingPath)
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unknown target %q (must be auditd, journald, or syslog)\n", target)
 		os.Exit(1)

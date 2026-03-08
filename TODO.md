@@ -101,8 +101,8 @@ Separately from the mapping layer, the current split-on-space field extraction i
 - [x] `MappedJournaldEvent` wrapper in `maps/journald/`
 - [x] Auto-discover mapping file in each `Chop()` function
 - [x] Replace `strings.Split(line, " ")` with a quoted-KV tokenizer in auditd parser
-- [ ] `-mapping` CLI flag in `main.go`
-- [ ] Update `README.md` with mapping file docs
+- [x] `-mapping` CLI flag in `main.go`
+- [x] Update `README.md` with mapping file docs
 
 ---
 

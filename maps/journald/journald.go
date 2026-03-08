@@ -105,7 +105,8 @@ var journaldRenderer = output.Renderer{
 // Chop scans the live systemd journal against Sigma rules and writes results
 // to stdout. Passing a file path is not supported because the journal uses a
 // binary format that requires the systemd API.
-func Chop(rulePath, outputType string) error {
+// mappingPath overrides the default mappings/journald.yml when non-empty.
+func Chop(rulePath, outputType, mappingPath string) error {
 	events, err := ParseEvents()
 	if err != nil {
 		return fmt.Errorf("reading journal: %w", err)
@@ -122,7 +123,10 @@ func Chop(rulePath, outputType string) error {
 		bar = progressbar.Default(int64(len(events)))
 	}
 
-	m := mapping.LoadOrIdentity("mappings/journald.yml", "journald")
+	if mappingPath == "" {
+		mappingPath = "mappings/journald.yml"
+	}
+	m := mapping.LoadOrIdentity(mappingPath, "journald")
 
 	var results []output.ScanResult
 	for _, event := range events {
@@ -152,8 +156,8 @@ func Chop(rulePath, outputType string) error {
 }
 
 // ChopToLog is like Chop but calls log.Fatalf on error, for use from main.
-func ChopToLog(rulePath, outputType string) {
-	if err := Chop(rulePath, outputType); err != nil {
+func ChopToLog(rulePath, outputType, mappingPath string) {
+	if err := Chop(rulePath, outputType, mappingPath); err != nil {
 		log.Fatalf("journald: %v", err)
 	}
 }
