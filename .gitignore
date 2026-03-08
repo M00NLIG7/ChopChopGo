@@ -1,3 +1,6 @@
+# Sigma rules (fetched via update-rules.sh, not tracked in repo)
+rules/
+
 # Build output
 ChopChopGo
 ChopChopGo.exe
