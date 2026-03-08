@@ -142,13 +142,13 @@ func generateAuditd(rng *rand.Rand, start time.Time, count int, ratio float64) (
 		seq += rng.Intn(3) + 1
 		ts := cur.Unix()
 
-		var e entry
 		if rng.Float64() < ratio {
-			e = auditdSuspicious(rng, ts, seq)
+			// Suspicious events are correlated groups so merged events have
+			// fully populated columns (exe, auid, pid from SYSCALL).
+			entries = append(entries, auditdSuspicious(rng, ts, seq)...)
 		} else {
-			e = auditdBenign(rng, ts, seq)
+			entries = append(entries, auditdBenign(rng, ts, seq))
 		}
-		entries = append(entries, e)
 	}
 	return entries, cur
 }
@@ -202,84 +202,90 @@ func auditdBenign(rng *rand.Rand, ts int64, seq int) entry {
 	return entry{line: auditField(ts, seq, chosen.typ, chosen.fields)}
 }
 
-func auditdSuspicious(rng *rand.Rand, ts int64, seq int) entry {
+// auditdSuspicious returns a correlated group of records sharing the same seq.
+// The SYSCALL record always comes first so correlation merges exe/auid/pid into
+// the final event — whatever subsequent record type triggers the sigma rule,
+// the output row will have fully populated columns.
+func auditdSuspicious(rng *rand.Rand, ts int64, seq int) []entry {
 	pid := randPID(rng)
+	ppid := randPID(rng)
 	auid := 1000 + rng.Intn(3)
 
 	type suspTmpl struct {
-		typ, fields, rule string
+		comm, exe         string // for SYSCALL
+		secondType        string // EXECVE or PATH
+		secondFields      string
+		rule              string
 	}
 
 	templates := []suspTmpl{
 		// lnx_auditd_susp_c2_commands
 		{
-			"SYSCALL",
-			fmt.Sprintf(
-				"arch=c000003e syscall=59 success=yes exit=0 ppid=%d pid=%d auid=%d uid=%d gid=%d euid=%d suid=%d fsuid=%d egid=%d sgid=%d fsgid=%d tty=pts1 ses=3 comm=%q exe=%q key=susp_activity",
-				randPID(rng), pid, auid, auid, auid, auid, auid, auid, auid, auid, auid,
-				pick(rng, []string{"nc", "wget", "curl", "nmap", "socat", "ncat", "ssh", "base64"}),
-				pick(rng, []string{"/bin/nc", "/usr/bin/wget", "/usr/bin/curl", "/usr/bin/nmap", "/usr/bin/socat", "/usr/bin/ncat", "/usr/bin/ssh", "/usr/bin/base64"}),
+			comm: pick(rng, []string{"nc", "ncat", "socat", "nmap", "base64", "wget", "curl"}),
+			exe:  pick(rng, []string{"/bin/nc", "/usr/bin/ncat", "/usr/bin/socat", "/usr/bin/nmap", "/usr/bin/base64", "/usr/bin/wget", "/usr/bin/curl"}),
+			secondType: "EXECVE",
+			secondFields: fmt.Sprintf("argc=2 a0=%q a1=%q",
+				pick(rng, []string{"nc", "ncat", "socat"}),
+				pick(rng, srcIPs),
 			),
-			"lnx_auditd_susp_c2_commands",
+			rule: "lnx_auditd_susp_c2_commands",
 		},
-		// lnx_auditd_system_info_discovery (EXECVE)
+		// lnx_auditd_system_info_discovery
 		{
-			"EXECVE",
-			fmt.Sprintf(
-				"argc=%d a0=%s a1=%s pid=%d auid=%d",
-				rng.Intn(2)+1,
-				pick(rng, []string{"uname", "hostname", "uptime", "env", "lsmod"}),
-				pick(rng, []string{"-a", "-r", "--all", ""}),
-				pid, auid,
+			comm: pick(rng, []string{"uname", "hostname", "lsmod", "env"}),
+			exe:  pick(rng, []string{"/usr/bin/uname", "/usr/bin/hostname", "/sbin/lsmod", "/usr/bin/env"}),
+			secondType: "EXECVE",
+			secondFields: fmt.Sprintf("argc=2 a0=%q a1=%q",
+				pick(rng, []string{"uname", "hostname"}),
+				pick(rng, []string{"-a", "-r", "--all"}),
 			),
-			"lnx_auditd_system_info_discovery",
+			rule: "lnx_auditd_system_info_discovery",
 		},
-		// lnx_auditd_system_info_discovery (PATH)
+		// lnx_auditd_system_info_discovery via PATH
 		{
-			"PATH",
-			fmt.Sprintf(
-				"item=0 name=%s inode=%d dev=fd:00 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL",
+			comm: "cat",
+			exe:  "/bin/cat",
+			secondType: "PATH",
+			secondFields: fmt.Sprintf("item=0 name=%s inode=%d dev=fd:00 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL",
 				pick(rng, []string{"/etc/lsb-release", "/etc/redhat-release", "/etc/issue"}),
 				rng.Intn(999999)+1000,
 			),
-			"lnx_auditd_system_info_discovery",
+			rule: "lnx_auditd_system_info_discovery",
 		},
-		// lnx_auditd_password_policy_discovery (PATH)
+		// lnx_auditd_password_policy_discovery via PATH
 		{
-			"PATH",
-			fmt.Sprintf(
-				"item=0 name=%s inode=%d dev=fd:00 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL",
+			comm: "cat",
+			exe:  "/bin/cat",
+			secondType: "PATH",
+			secondFields: fmt.Sprintf("item=0 name=%s inode=%d dev=fd:00 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL",
 				pick(rng, []string{"/etc/login.defs", "/etc/pam.d/common-auth", "/etc/pam.d/common-password", "/etc/security/pwquality.conf"}),
 				rng.Intn(999999)+1000,
 			),
-			"lnx_auditd_password_policy_discovery",
+			rule: "lnx_auditd_password_policy_discovery",
 		},
-		// lnx_auditd_password_policy_discovery (EXECVE chage)
+		// lnx_auditd_password_policy_discovery via EXECVE chage
 		{
-			"EXECVE",
-			fmt.Sprintf(
-				"argc=3 a0=chage a1=%s a2=%s pid=%d auid=%d",
+			comm: "chage",
+			exe:  "/usr/bin/chage",
+			secondType: "EXECVE",
+			secondFields: fmt.Sprintf("argc=3 a0=chage a1=%q a2=%q",
 				pick(rng, []string{"--list", "-l"}),
 				pick(rng, usernames),
-				pid, auid,
 			),
-			"lnx_auditd_password_policy_discovery",
-		},
-		// lnx_auditd_password_policy_discovery (EXECVE passwd)
-		{
-			"EXECVE",
-			fmt.Sprintf("argc=2 a0=passwd a1=%s pid=%d auid=%d",
-				pick(rng, []string{"-S", "--status"}),
-				pid, auid,
-			),
-			"lnx_auditd_password_policy_discovery",
+			rule: "lnx_auditd_password_policy_discovery",
 		},
 	}
 
-	chosen := templates[rng.Intn(len(templates))]
-	return entry{
-		line: auditField(ts, seq, chosen.typ, chosen.fields),
-		rule: chosen.rule,
+	t := templates[rng.Intn(len(templates))]
+
+	syscallFields := fmt.Sprintf(
+		"arch=c000003e syscall=59 success=yes exit=0 ppid=%d pid=%d auid=%d uid=%d gid=%d euid=%d suid=%d fsuid=%d egid=%d sgid=%d fsgid=%d tty=pts1 ses=3 comm=%q exe=%q key=susp_activity",
+		ppid, pid, auid, auid, auid, auid, auid, auid, auid, auid, auid, t.comm, t.exe,
+	)
+
+	return []entry{
+		{line: auditField(ts, seq, "SYSCALL", syscallFields), rule: t.rule},
+		{line: auditField(ts, seq, t.secondType, t.secondFields)},
 	}
 }
 
