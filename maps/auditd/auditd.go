@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,11 +14,6 @@ import (
 	"github.com/M00NLIG7/ChopChopGo/maps/output"
 	"github.com/schollz/progressbar/v3"
 )
-
-// msgRe extracts the Unix second and sequence number from an audit(SSSS.mmm:SEQ) token.
-// Both captures are used: the timestamp for display and the seq for event correlation.
-// Compiled once at package level to avoid per-line overhead.
-var msgRe = regexp.MustCompile(`audit\((\d+)\.\d*:(\d+)\)`)
 
 // AuditEvent represents a single record from the auditd log.
 type AuditEvent struct {
@@ -61,23 +55,58 @@ func (e MappedAuditEvent) Select(name string) (interface{}, bool) {
 	return e.AuditEvent.Select(e.m.Resolve(name))
 }
 
-// parseLine tokenizes a single auditd log line into a key-value map.
-//
-// It walks the line once, character by character, respecting both double-quoted
-// and single-quoted values so fields like:
-//
-//	proctitle="bash -c rm -rf /"
-//	msg='op=PAM:authentication acct="root" res=failed'
-//
-// are stored correctly. This avoids the allocation overhead of strings.Split
-// and correctly handles spaces inside quoted values — a bug the old approach
-// could not fix without a much more complex regular expression.
-func parseLine(line string) map[string]string {
-	event := make(map[string]string, 16)
-	i, n := 0, len(line)
+// extractAuditToken finds the audit(UNIXTS.mmm:SEQ) token in line and returns
+// the sequence number and a formatted RFC3339 timestamp. Returns ("", "") when
+// no valid token is present. This replaces the msgRe regex, eliminating the
+// []string submatch allocation on every line.
+func extractAuditToken(line string) (seq, ts string) {
+	idx := strings.Index(line, "audit(")
+	if idx < 0 {
+		return "", ""
+	}
+	s := line[idx+6:] // skip "audit("
+	dot := strings.IndexByte(s, '.')
+	if dot < 0 {
+		return "", ""
+	}
+	unixStr := s[:dot]
+	s = s[dot+1:]
+	colon := strings.IndexByte(s, ':')
+	if colon < 0 {
+		return "", ""
+	}
+	s = s[colon+1:]
+	end := strings.IndexByte(s, ')')
+	if end < 0 {
+		return "", ""
+	}
+	seq = s[:end]
+	unixTime, err := strconv.ParseInt(unixStr, 10, 64)
+	if err != nil {
+		return seq, ""
+	}
+	return seq, time.Unix(unixTime, 0).UTC().Format(time.RFC3339)
+}
 
+// mergeLineInto parses line with the character-walking tokenizer and writes
+// each key=value pair into dest using first-wins semantics — keys already
+// present in dest are not overwritten. The pre-extracted ts and seq are written
+// before scanning so that SYSCALL fields always win over later record types.
+// The msg=audit(...) token is skipped since extractAuditToken already handled it.
+func mergeLineInto(line string, dest map[string]string, ts, seq string) {
+	if ts != "" {
+		if _, ok := dest["timestamp"]; !ok {
+			dest["timestamp"] = ts
+		}
+	}
+	if seq != "" {
+		if _, ok := dest["seq"]; !ok {
+			dest["seq"] = seq
+		}
+	}
+
+	i, n := 0, len(line)
 	for i < n {
-		// Skip inter-field spaces.
 		for i < n && line[i] == ' ' {
 			i++
 		}
@@ -85,13 +114,11 @@ func parseLine(line string) map[string]string {
 			break
 		}
 
-		// Read key (up to '=' or end of token).
 		keyStart := i
 		for i < n && line[i] != '=' && line[i] != ' ' {
 			i++
 		}
 		if i >= n || line[i] != '=' {
-			// No '=' — not a key=value token; skip.
 			for i < n && line[i] != ' ' {
 				i++
 			}
@@ -100,27 +127,26 @@ func parseLine(line string) map[string]string {
 		key := line[keyStart:i]
 		i++ // consume '='
 
-		// Read value: double-quoted, single-quoted, or bare (until space).
 		var value string
 		if i < n && line[i] == '"' {
-			i++ // consume opening '"'
+			i++
 			start := i
 			for i < n && line[i] != '"' {
 				i++
 			}
 			value = line[start:i]
 			if i < n {
-				i++ // consume closing '"'
+				i++
 			}
 		} else if i < n && line[i] == '\'' {
-			i++ // consume opening '\''
+			i++
 			start := i
 			for i < n && line[i] != '\'' {
 				i++
 			}
 			value = line[start:i]
 			if i < n {
-				i++ // consume closing '\''
+				i++
 			}
 		} else {
 			start := i
@@ -130,21 +156,24 @@ func parseLine(line string) map[string]string {
 			value = line[start:i]
 		}
 
-		// The msg field holds the audit timestamp and sequence number.
+		// Skip the msg=audit(...) token — handled by extractAuditToken.
 		if key == "msg" && len(value) > 6 && value[:6] == "audit(" {
-			matches := msgRe.FindStringSubmatch(value)
-			if matches == nil {
-				continue
-			}
-			unixTime, _ := strconv.ParseInt(matches[1], 10, 64)
-			event["timestamp"] = time.Unix(unixTime, 0).UTC().Format(time.RFC3339)
-			event["seq"] = matches[2]
-		} else {
-			event[key] = value
+			continue
+		}
+		if _, exists := dest[key]; !exists {
+			dest[key] = value
 		}
 	}
+}
 
-	return event
+// parseLine tokenizes a single auditd log line into a key-value map.
+// The hot path in ParseEvents calls extractAuditToken + mergeLineInto directly
+// to avoid allocating an intermediate map; parseLine is retained for tests.
+func parseLine(line string) map[string]string {
+	dest := make(map[string]string, 16)
+	seq, ts := extractAuditToken(line)
+	mergeLineInto(line, dest, ts, seq)
+	return dest
 }
 
 // windowSize is the maximum number of distinct sequence numbers held in memory
@@ -197,15 +226,10 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 			continue
 		}
 
-		data := parseLine(line)
-		if len(data) == 0 {
-			continue
-		}
-
-		seq := data["seq"]
+		// Extract seq and timestamp without allocating an intermediate map.
+		seq, ts := extractAuditToken(line)
 		if seq == "" {
 			// Record has no parseable sequence — treat as its own event.
-			// Use a stack buffer + strconv to avoid fmt.Sprintf's interface boxing.
 			b := append(soloKey[:0], "__solo_"...)
 			b = strconv.AppendInt(b, int64(standalone), 10)
 			seq = string(b)
@@ -215,7 +239,6 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 		if _, exists := groups[seq]; !exists {
 			// New seq: evict oldest group if the window is full.
 			if len(window) >= windowSize {
-				// Inline flush: avoids closure allocation and indirect call.
 				oldest := window[0]
 				copy(window, window[1:])
 				window = window[:len(window)-1]
@@ -224,15 +247,11 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 				events = append(events, AuditEvent{Type: g["type"], Data: g})
 			}
 			window = append(window, seq)
-			groups[seq] = make(map[string]string, len(data))
+			groups[seq] = make(map[string]string, 16)
 		}
 
-		g := groups[seq]
-		for k, v := range data {
-			if _, exists := g[k]; !exists {
-				g[k] = v // first record wins
-			}
-		}
+		// Merge directly into the group map — no intermediate map allocated.
+		mergeLineInto(line, groups[seq], ts, seq)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
