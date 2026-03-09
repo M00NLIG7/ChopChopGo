@@ -186,14 +186,9 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 	// groups maps seq → merged field map; only window entries are present.
 	groups := make(map[string]map[string]string, windowSize)
 
-	flushOldest := func() {
-		seq := window[0]
-		copy(window, window[1:])
-		window = window[:len(window)-1]
-		g := groups[seq]
-		delete(groups, seq)
-		events = append(events, AuditEvent{Type: g["type"], Data: g})
-	}
+	// soloKey is a stack-allocated scratch buffer for formatting __solo_N keys,
+	// avoiding the interface boxing that fmt.Sprintf would cause.
+	var soloKey [32]byte
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -210,14 +205,23 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 		seq := data["seq"]
 		if seq == "" {
 			// Record has no parseable sequence — treat as its own event.
-			seq = fmt.Sprintf("__solo_%d", standalone)
+			// Use a stack buffer + strconv to avoid fmt.Sprintf's interface boxing.
+			b := append(soloKey[:0], "__solo_"...)
+			b = strconv.AppendInt(b, int64(standalone), 10)
+			seq = string(b)
 			standalone++
 		}
 
 		if _, exists := groups[seq]; !exists {
 			// New seq: evict oldest group if the window is full.
 			if len(window) >= windowSize {
-				flushOldest()
+				// Inline flush: avoids closure allocation and indirect call.
+				oldest := window[0]
+				copy(window, window[1:])
+				window = window[:len(window)-1]
+				g := groups[oldest]
+				delete(groups, oldest)
+				events = append(events, AuditEvent{Type: g["type"], Data: g})
 			}
 			window = append(window, seq)
 			groups[seq] = make(map[string]string, len(data))
