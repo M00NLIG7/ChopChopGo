@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"regexp"
 	"strings"
 
 	sigma "github.com/M00NLIG7/go-sigma-rule-engine"
@@ -14,11 +13,41 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-// Compiled once at package level to avoid per-line overhead.
-var (
-	syslogRe  = regexp.MustCompile(`^([a-zA-Z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})`)
-	rsyslogRe = regexp.MustCompile(`^((-?(?:[1-9][0-9]*)?[0-9]{4})-(1[0-2]|0[1-9])-(3[01]|0[1-9]|[12][0-9])T(2[0-3]|[01][0-9]):([0-5][0-9]):([0-5][0-9])(\.[0-9]+)?(Z|[+-](?:2[0-3]|[01][0-9]):[0-5][0-9])?)`)
-)
+func isAlpha(b byte) bool { return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
+func isDigit(b byte) bool { return b >= '0' && b <= '9' }
+
+// parseSyslogTimestamp extracts the leading timestamp from a syslog line without
+// regex, eliminating the []string submatch allocation on every line.
+// It recognises two formats:
+//
+//   - BSD syslog: "Mon DD HH:MM:SS" (exactly 15 bytes, space-padded day)
+//   - rsyslog/ISO8601: "YYYY-…" terminated by the first space
+//
+// Returns the timestamp substring and its byte length. Returns ("", 0) when
+// the line does not match either format.
+func parseSyslogTimestamp(line string) (ts string, n int) {
+	// BSD syslog: "Mon DD HH:MM:SS" — 15 bytes, fixed structure.
+	if len(line) >= 15 &&
+		isAlpha(line[0]) && isAlpha(line[1]) && isAlpha(line[2]) && // Mon
+		line[3] == ' ' &&
+		(line[4] == ' ' || isDigit(line[4])) && isDigit(line[5]) && // DD (space-padded)
+		line[6] == ' ' &&
+		isDigit(line[7]) && isDigit(line[8]) && line[9] == ':' && // HH:
+		isDigit(line[10]) && isDigit(line[11]) && line[12] == ':' && // MM:
+		isDigit(line[13]) && isDigit(line[14]) { // SS
+		return line[:15], 15
+	}
+	// rsyslog/ISO8601: starts with four digits and a '-' (YYYY-).
+	// The timestamp ends at the first space.
+	if len(line) >= 5 &&
+		isDigit(line[0]) && isDigit(line[1]) && isDigit(line[2]) && isDigit(line[3]) &&
+		line[4] == '-' {
+		if idx := strings.IndexByte(line, ' '); idx > 0 {
+			return line[:idx], idx
+		}
+	}
+	return "", 0
+}
 
 // SyslogEvent represents a parsed syslog entry.
 type SyslogEvent struct {
@@ -76,12 +105,8 @@ func ParseEvents(logFile string) ([]SyslogEvent, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		var timestamp string
-		if m := syslogRe.FindStringSubmatch(line); m != nil {
-			timestamp = m[1]
-		} else if m := rsyslogRe.FindStringSubmatch(line); m != nil {
-			timestamp = m[1]
-		} else {
+		timestamp, n := parseSyslogTimestamp(line)
+		if timestamp == "" {
 			// Skip lines we cannot parse — don't abort the whole scan.
 			continue
 		}
@@ -89,7 +114,7 @@ func ParseEvents(logFile string) ([]SyslogEvent, error) {
 		// Everything after the timestamp is "hostname proc[pid]: message".
 		// We store the hostname in Facility and the rest in Message so that
 		// keyword-based Sigma rules can match against process/message content.
-		rest := strings.TrimSpace(line[len(timestamp):])
+		rest := strings.TrimSpace(line[n:])
 		var facility, message string
 		if idx := strings.IndexByte(rest, ' '); idx >= 0 {
 			facility = rest[:idx]

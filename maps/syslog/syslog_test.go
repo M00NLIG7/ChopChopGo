@@ -1,6 +1,7 @@
 package syslog
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,5 +161,48 @@ func TestFindLogMissingFile(t *testing.T) {
 	_, err := FindLog("/nonexistent/path/syslog")
 	if err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+const bsdLine = "Mar  1 10:00:01 hostname sshd[1234]: Accepted publickey for user from 192.168.1.1 port 22"
+const rsyslogLine = "2023-03-01T10:00:01.123456+00:00 hostname sshd[1234]: Accepted publickey for user from 192.168.1.1 port 22"
+
+func BenchmarkParseEventsBSD(b *testing.B) {
+	const n = 100_000
+	tmp := b.TempDir()
+	f := filepath.Join(tmp, "bsd.log")
+	var sb strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&sb, "Mar %2d 10:00:01 hostname sshd[%d]: message number %d\n", (i%28)+1, i+1000, i)
+	}
+	if err := os.WriteFile(f, []byte(sb.String()), 0600); err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := ParseEvents(f); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkParseEventsRsyslog(b *testing.B) {
+	const n = 100_000
+	tmp := b.TempDir()
+	f := filepath.Join(tmp, "rsyslog.log")
+	var sb strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&sb, "2023-03-01T10:%02d:%02d.000000+00:00 hostname sshd[%d]: message number %d\n", (i/60)%60, i%60, i+1000, i)
+	}
+	if err := os.WriteFile(f, []byte(sb.String()), 0600); err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := ParseEvents(f); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
