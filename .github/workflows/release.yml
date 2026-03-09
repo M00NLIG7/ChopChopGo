@@ -56,4 +56,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG=${GITHUB_REF_NAME}
+          # Create the release if it doesn't already exist (e.g. manually pre-created),
+          # then upload the artifact. --clobber replaces any existing asset with the same name.
+          gh release create "${TAG}" --title "${TAG}" --generate-notes 2>/dev/null || true
           gh release upload "${TAG}" "ChopChopGo-${TAG}-linux-${{ matrix.arch }}.zip" --clobber
