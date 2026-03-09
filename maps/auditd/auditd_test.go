@@ -1,6 +1,7 @@
 package auditd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -300,6 +301,44 @@ func TestFindLogMissingFile(t *testing.T) {
 // representativeLine is a realistic auditd SYSCALL line with quoted fields and
 // a long argument list — the kind of line the parser sees most often.
 const representativeLine = `type=SYSCALL msg=audit(1364481363.243:24287): arch=c000003e syscall=59 success=yes exit=0 a0=7f1234 a1=7f5678 a2=7f9abc a3=0 items=2 ppid=2686 pid=3538 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts0 ses=1 comm="bash" exe="/bin/bash" key="susp_exec"`
+
+// TestParseEventsWindowBoundary verifies that flushing the sliding window does
+// not drop events or split correlated groups. It generates more than windowSize
+// distinct sequence numbers, each with two correlated records, and asserts that
+// every group arrives complete and in order.
+func TestParseEventsWindowBoundary(t *testing.T) {
+	total := windowSize*2 + 5 // well beyond one window flush cycle
+	tmp := t.TempDir()
+	f := filepath.Join(tmp, "window.log")
+
+	var sb strings.Builder
+	for i := 0; i < total; i++ {
+		// Two records per logical event sharing the same seq.
+		fmt.Fprintf(&sb, "type=SYSCALL msg=audit(1000000000.000:%d): pid=%d auid=1000 exe=\"/bin/sh\"\n", i, i+100)
+		fmt.Fprintf(&sb, "type=EXECVE  msg=audit(1000000000.000:%d): argc=1 a0=\"sh\"\n", i)
+	}
+	if err := os.WriteFile(f, []byte(sb.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := ParseEvents(f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != total {
+		t.Fatalf("expected %d events, got %d", total, len(events))
+	}
+	for i, e := range events {
+		// Each merged event must carry fields from both records.
+		wantPID := fmt.Sprintf("%d", i+100)
+		if e.Data["pid"] != wantPID {
+			t.Errorf("event %d: pid=%q, want %q", i, e.Data["pid"], wantPID)
+		}
+		if e.Data["argc"] != "1" {
+			t.Errorf("event %d: argc=%q (EXECVE field missing after window flush)", i, e.Data["argc"])
+		}
+	}
+}
 
 // BenchmarkTokenizeParseLine measures the tokenizer-based parsing kernel.
 func BenchmarkTokenizeParseLine(b *testing.B) {

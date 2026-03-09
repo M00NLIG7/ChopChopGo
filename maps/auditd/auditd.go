@@ -147,6 +147,12 @@ func parseLine(line string) map[string]string {
 	return event
 }
 
+// windowSize is the maximum number of distinct sequence numbers held in memory
+// at once. auditd records for a single event are always written consecutively
+// (typically 4–6 records), so 32 is a generous safety margin. Peak memory
+// usage is O(windowSize × fields) regardless of log size.
+const windowSize = 32
+
 // ParseEvents reads an auditd log file, correlates multi-record events by their
 // sequence number, and returns one merged AuditEvent per logical event.
 //
@@ -158,6 +164,11 @@ func parseLine(line string) map[string]string {
 // Field precedence within a group: first record wins. SYSCALL is always
 // written before EXECVE/CWD/PATH so SYSCALL fields (exe, auid, pid) take
 // priority over the same-named fields on later record types.
+//
+// Streaming sliding-window: at most windowSize groups are kept in memory at
+// once. When the window is full and a new sequence number arrives, the oldest
+// group is flushed immediately. This reduces peak memory from O(total records)
+// to O(windowSize × fields), making multi-GB log scanning practical.
 func ParseEvents(logFile string) ([]AuditEvent, error) {
 	file, err := os.Open(logFile)
 	if err != nil {
@@ -165,12 +176,24 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 	}
 	defer file.Close()
 
-	// seqOrder tracks insertion order so output preserves log order.
-	var seqOrder []string
-	// groups maps seq → merged field map. Key "" is used for records with no
-	// valid audit(ts:seq) token; each such record gets its own unique slot.
-	groups := make(map[string]map[string]string)
+	var events []AuditEvent
 	standalone := 0
+
+	// window is a fixed-capacity queue of seq strings in insertion order.
+	// We keep it at most windowSize long; copy+reslice keeps the backing
+	// array capped at windowSize+1 so memory stays O(windowSize).
+	window := make([]string, 0, windowSize+1)
+	// groups maps seq → merged field map; only window entries are present.
+	groups := make(map[string]map[string]string, windowSize)
+
+	flushOldest := func() {
+		seq := window[0]
+		copy(window, window[1:])
+		window = window[:len(window)-1]
+		g := groups[seq]
+		delete(groups, seq)
+		events = append(events, AuditEvent{Type: g["type"], Data: g})
+	}
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -192,7 +215,11 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 		}
 
 		if _, exists := groups[seq]; !exists {
-			seqOrder = append(seqOrder, seq)
+			// New seq: evict oldest group if the window is full.
+			if len(window) >= windowSize {
+				flushOldest()
+			}
+			window = append(window, seq)
 			groups[seq] = make(map[string]string, len(data))
 		}
 
@@ -207,8 +234,8 @@ func ParseEvents(logFile string) ([]AuditEvent, error) {
 		return nil, err
 	}
 
-	events := make([]AuditEvent, 0, len(seqOrder))
-	for _, seq := range seqOrder {
+	// Flush all remaining groups in insertion order.
+	for _, seq := range window {
 		g := groups[seq]
 		events = append(events, AuditEvent{Type: g["type"], Data: g})
 	}
