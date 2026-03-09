@@ -1,6 +1,7 @@
 package auditd
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -349,10 +350,9 @@ func BenchmarkTokenizeParseLine(b *testing.B) {
 	}
 }
 
-// BenchmarkParseEvents measures end-to-end throughput including file I/O on a
-// synthetic 10 000-line log so the absolute cost of a real scan is visible.
+// BenchmarkParseEvents measures end-to-end throughput on a 10 000-line log
+// where all lines share the same sequence number (one giant correlated group).
 func BenchmarkParseEvents(b *testing.B) {
-	// Build a large log file once outside the timer.
 	tmp := b.TempDir()
 	f := filepath.Join(tmp, "bench.log")
 	var sb strings.Builder
@@ -365,6 +365,105 @@ func BenchmarkParseEvents(b *testing.B) {
 	}
 
 	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := ParseEvents(f); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// parseEventsOld is the pre-window full-buffering implementation kept only for
+// benchmark comparison. It accumulates every group and seq in memory before
+// returning — O(total records) peak allocation.
+func parseEventsOld(logFile string) ([]AuditEvent, error) {
+	file, err := os.Open(logFile)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var seqOrder []string
+	groups := make(map[string]map[string]string)
+	standalone := 0
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "type=") {
+			continue
+		}
+		data := parseLine(line)
+		if len(data) == 0 {
+			continue
+		}
+		seq := data["seq"]
+		if seq == "" {
+			seq = fmt.Sprintf("__solo_%d", standalone)
+			standalone++
+		}
+		if _, exists := groups[seq]; !exists {
+			seqOrder = append(seqOrder, seq)
+			groups[seq] = make(map[string]string, len(data))
+		}
+		g := groups[seq]
+		for k, v := range data {
+			if _, exists := g[k]; !exists {
+				g[k] = v
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	events := make([]AuditEvent, 0, len(seqOrder))
+	for _, seq := range seqOrder {
+		g := groups[seq]
+		events = append(events, AuditEvent{Type: g["type"], Data: g})
+	}
+	return events, nil
+}
+
+// BenchmarkParseEventsManySeqsOld is the baseline: old full-buffering approach.
+func BenchmarkParseEventsManySeqsOld(b *testing.B) {
+	const numEvents = 100_000
+	tmp := b.TempDir()
+	f := filepath.Join(tmp, "manyseqs_old.log")
+	var sb strings.Builder
+	for i := 0; i < numEvents; i++ {
+		fmt.Fprintf(&sb, "type=SYSCALL msg=audit(1000000000.000:%d): arch=c000003e syscall=59 pid=%d auid=1000 uid=1000 exe=\"/bin/bash\" comm=\"bash\" key=\"exec\"\n", i, i+1000)
+		fmt.Fprintf(&sb, "type=EXECVE  msg=audit(1000000000.000:%d): argc=2 a0=\"bash\" a1=\"-c\"\n", i)
+	}
+	if err := os.WriteFile(f, []byte(sb.String()), 0600); err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := parseEventsOld(f); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkParseEventsManySeqs stresses the sliding-window path: 100 000
+// distinct events, each with a SYSCALL + EXECVE record pair. This is the
+// workload where the old full-buffering approach accumulated O(N) groups in
+// memory; the window keeps at most windowSize groups live at any time.
+func BenchmarkParseEventsManySeqs(b *testing.B) {
+	const numEvents = 100_000
+	tmp := b.TempDir()
+	f := filepath.Join(tmp, "manyseqs.log")
+	var sb strings.Builder
+	for i := 0; i < numEvents; i++ {
+		fmt.Fprintf(&sb, "type=SYSCALL msg=audit(1000000000.000:%d): arch=c000003e syscall=59 pid=%d auid=1000 uid=1000 exe=\"/bin/bash\" comm=\"bash\" key=\"exec\"\n", i, i+1000)
+		fmt.Fprintf(&sb, "type=EXECVE  msg=audit(1000000000.000:%d): argc=2 a0=\"bash\" a1=\"-c\"\n", i)
+	}
+	if err := os.WriteFile(f, []byte(sb.String()), 0600); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if _, err := ParseEvents(f); err != nil {
 			b.Fatal(err)
