@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -161,6 +162,62 @@ func TestFindLogMissingFile(t *testing.T) {
 	_, err := FindLog("/nonexistent/path/syslog")
 	if err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+// TestParseSyslogTimestampEquivalence verifies that parseSyslogTimestamp returns
+// the same timestamp string that the original regex implementations would have
+// returned, across a representative set of real-world and edge-case lines.
+func TestParseSyslogTimestampEquivalence(t *testing.T) {
+	syslogRe := regexp.MustCompile(`^([a-zA-Z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})`)
+	rsyslogRe := regexp.MustCompile(`^((-?(?:[1-9][0-9]*)?[0-9]{4})-(1[0-2]|0[1-9])-(3[01]|0[1-9]|[12][0-9])T(2[0-3]|[01][0-9]):([0-5][0-9]):([0-5][0-9])(\.[0-9]+)?(Z|[+-](?:2[0-3]|[01][0-9]):[0-5][0-9])?)`)
+
+	regexTimestamp := func(line string) string {
+		if m := syslogRe.FindStringSubmatch(line); m != nil {
+			return m[1]
+		}
+		if m := rsyslogRe.FindStringSubmatch(line); m != nil {
+			return m[1]
+		}
+		return ""
+	}
+
+	cases := []struct {
+		desc string
+		line string
+	}{
+		// BSD: single-digit day (space-padded)
+		{"BSD single-digit day", "Mar  1 10:00:01 host sshd[1]: msg"},
+		{"BSD single-digit day 9", "Dec  9 23:59:59 host sshd[1]: msg"},
+		// BSD: double-digit day
+		{"BSD double-digit day", "Mar 12 10:00:01 host sshd[1]: msg"},
+		{"BSD double-digit day 31", "Jan 31 00:00:00 host sshd[1]: msg"},
+		// BSD: all months
+		{"BSD Jan", "Jan  1 00:00:00 host p[1]: m"},
+		{"BSD Feb", "Feb 28 23:59:59 host p[1]: m"},
+		{"BSD Nov", "Nov 30 12:00:00 host p[1]: m"},
+		// rsyslog: UTC Z
+		{"rsyslog UTC Z", "2023-03-01T10:00:01Z host sshd[1]: msg"},
+		// rsyslog: positive timezone offset
+		{"rsyslog +offset", "2023-03-01T10:00:01+05:30 host sshd[1]: msg"},
+		// rsyslog: negative timezone offset
+		{"rsyslog -offset", "2023-03-01T10:00:01-08:00 host sshd[1]: msg"},
+		// rsyslog: with microseconds
+		{"rsyslog microseconds", "2023-03-01T10:00:01.123456+00:00 host sshd[1]: msg"},
+		// rsyslog: no fractional seconds
+		{"rsyslog no frac", "2023-01-15T08:30:00+00:00 host sshd[1]: msg"},
+		// Should NOT match
+		{"empty line", ""},
+		{"plain text", "this is not a log line"},
+		{"partial timestamp", "Mar 1"},
+	}
+
+	for _, c := range cases {
+		want := regexTimestamp(c.line)
+		got, _ := parseSyslogTimestamp(c.line)
+		if got != want {
+			t.Errorf("%s:\n  line: %q\n  regex: %q\n  hand:  %q", c.desc, c.line, want, got)
+		}
 	}
 }
 
